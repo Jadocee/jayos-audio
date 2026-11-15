@@ -141,6 +141,7 @@ F="$(dirname "$0")/../fake"
 { printf '%q ' "$@"; printf '\n'; } >> "$F/cargo.argv"
 printf '%s RUSTUP_TOOLCHAIN=%s CARGO_TARGET_DIR=%s PWD=%s\n' \
     "$1" "${RUSTUP_TOOLCHAIN-<unset>}" "${CARGO_TARGET_DIR-<unset>}" "$PWD" >> "$F/cargo.env"
+printf '%s RUSTFLAGS=%s\n' "$1" "${RUSTFLAGS-<unset>}" >> "$F/cargo.flags"
 [[ "$1" == tree ]] && cat "$F/tree.out"
 st="$F/status.$1"; [[ "${PWD##*/}" == rust ]] && st="$F/status.$1.rust"
 s=0; [[ -f "$st" ]] && s=$(<"$st")
@@ -179,12 +180,35 @@ f="$F/readelf.out.${2##*/}"
 [[ -f "$f" ]] && exec cat "$f"
 cat "$F/readelf.out"
 FAKE
+# ld.mold: there for steps.sh to find, as the recipes' makedepends put it
+# there; nothing runs it, since the fake cargo links nothing.
+printf '#!/bin/sh\nexit 0\n' > "$WORK/bin/ld.mold"
 chmod 755 "$WORK/bin"/*
 
 # steps <verb> [args...]: the scratch steps.sh, fakes first on PATH.
 # Sets RC, OUT (stdout) and ERR (stderr).
 steps() {
     OUT=$(PATH="$WORK/bin:$PATH" bash "$STEPS" "$@" 2>"$WORK/err")
+    RC=$?
+    ERR=$(<"$WORK/err")
+}
+# steps_without_mold <verb> [args...]: the same, on a PATH of links to every
+# command the fakes and this machine have but ld.mold, so a machine that has
+# mold runs the case as one that does not.
+NOMOLD="$WORK/no-mold-bin"
+steps_without_mold() {
+    local d f
+    if [[ ! -d "$NOMOLD" ]]; then
+        mkdir -p "$NOMOLD"
+        IFS=: read -ra dirs <<<"$WORK/bin:$PATH"
+        for d in "${dirs[@]}"; do
+            for f in "$d"/*; do
+                [[ -x "$f" && ! -d "$f" && "${f##*/}" != ld.mold && ! -e "$NOMOLD/${f##*/}" ]] \
+                    && ln -s "$f" "$NOMOLD/${f##*/}"
+            done
+        done
+    fi
+    OUT=$(PATH="$NOMOLD" bash "$STEPS" "$@" 2>"$WORK/err")
     RC=$?
     ERR=$(<"$WORK/err")
 }
@@ -400,7 +424,7 @@ release: 1.90.0"
 TREE=$(realpath "$FORK")
 
 reset_cargo() {
-    rm -f "$F"/status.* "$F"/*.argv "$F/cargo.env"
+    rm -f "$F"/status.* "$F"/*.argv "$F/cargo.env" "$F/cargo.flags"
     printf '%s\n' "$RUSTC_OK" > "$F/rustc.out"
 }
 
@@ -525,6 +549,46 @@ steps build
 expect_fail "build with no tree is a usage error" "usage:"
 steps fetch "$WORK/no-such-dir"
 expect_fail "fetch of a directory that does not exist fails" "no plugin tree at"
+
+# MOLD LINKS IT, through RUSTFLAGS: each of build's two cargo calls is
+# started with mold's flag, after whatever RUSTFLAGS makepkg.conf set and
+# once; and with no ld.mold, build refuses before cargo, naming it. Fetch
+# links nothing, and asks nothing of mold.
+reset_cargo
+steps build "$FORK"
+want="build RUSTFLAGS=-C link-arg=-fuse-ld=mold|build RUSTFLAGS=-C link-arg=-fuse-ld=mold"
+if [[ "$(paste -sd'|' "$F/cargo.flags" 2>/dev/null)" == "$want" ]]; then
+    pass "build starts both cargo calls with mold's flag in RUSTFLAGS"
+else
+    bad "build's cargo calls had '$(paste -sd'|' "$F/cargo.flags" 2>/dev/null)', not '$want'"
+fi
+reset_cargo
+RUSTFLAGS=-Cforce-frame-pointers=yes steps build "$FORK"
+want="build RUSTFLAGS=-Cforce-frame-pointers=yes -C link-arg=-fuse-ld=mold"
+if [[ "$(sort -u "$F/cargo.flags" 2>/dev/null)" == "$want" && "$(grep -c . "$F/cargo.flags")" == 2 ]]; then
+    pass "after the RUSTFLAGS makepkg set, which stay, and once"
+else
+    bad "with makepkg's RUSTFLAGS, build's cargo calls had '$(paste -sd'|' "$F/cargo.flags" 2>/dev/null)'"
+fi
+reset_cargo
+RUSTFLAGS="-C link-arg=-fuse-ld=mold" steps build "$FORK"
+want="build RUSTFLAGS=-C link-arg=-fuse-ld=mold"
+if [[ "$(sort -u "$F/cargo.flags" 2>/dev/null)" == "$want" ]]; then
+    pass "and not a second time over a RUSTFLAGS that has it already"
+else
+    bad "over a RUSTFLAGS with mold's flag, build's cargo calls had '$(paste -sd'|' "$F/cargo.flags" 2>/dev/null)'"
+fi
+reset_cargo
+steps_without_mold build "$FORK"
+expect_fail "with no mold, build refuses" "mold is not installed, and this build links with it"
+if [[ ! -s "$F/cargo.argv" ]]; then
+    pass "before cargo is asked anything"
+else
+    bad "build ran cargo with no mold: $(oneline "$(cat "$F/cargo.argv")")"
+fi
+reset_cargo
+steps_without_mold fetch "$FORK"
+expect_ok "and fetch, which links nothing, runs without it"
 
 echo
 echo "check: what was built, proved"
@@ -833,8 +897,25 @@ patched_tree() {
     cp "$SO" "$FORK/target/release/"
 }
 patched_tree
+reset_cargo
 steps check "$FORK"
 expect_ok "the pin with every patch in it, a build beside it, passes"
+# Its tests link as the build did: every cargo call check makes is started
+# with mold's flag, so cargo reuses what build compiled; and with no ld.mold
+# it refuses before it runs any.
+if [[ -s "$F/cargo.flags" ]] && ! grep -qv ' RUSTFLAGS=-C link-arg=-fuse-ld=mold$' "$F/cargo.flags"; then
+    pass "and starts each of its $(grep -c . "$F/cargo.flags") cargo calls with mold's flag, as build does"
+else
+    bad "check's cargo calls had '$(paste -sd'|' "$F/cargo.flags" 2>/dev/null)'"
+fi
+reset_cargo
+steps_without_mold check "$FORK"
+expect_fail "with no mold, check refuses" "mold is not installed, and this build links with it"
+if [[ ! -s "$F/cargo.argv" ]]; then
+    pass "before cargo is asked anything"
+else
+    bad "check ran cargo with no mold: $(oneline "$(cat "$F/cargo.argv")")"
+fi
 patched_tree
 git -C "$FORK" checkout -q --force --detach "$C2"
 steps check "$FORK"
@@ -877,6 +958,7 @@ want=$( {
         "f 755 usr/bin/jayos-audio-state" \
         "f 755 usr/bin/jayos-equalizer-preset" \
         "f 644 usr/lib/systemd/user/jayos-audio-denoise.service" \
+        "f 644 usr/lib/systemd/user/jayos-audio-channels.service" \
         "f 755 usr/lib/ladspa/libdeep_filter_ladspa.so" \
         "f 644 usr/share/licenses/jayos-audio/LICENSE" \
         "f 644 usr/share/licenses/jayos-audio/THIRD_PARTY.md" \
@@ -980,6 +1062,7 @@ same usr/lib/jayos-audio/VERSION "$REPO/VERSION" "VERSION"
 same usr/bin/jayos-audio-state "$WORK/jayos-audio-state.built" "/usr/bin/jayos-audio-state is the release build"
 same usr/bin/jayos-equalizer-preset "$WORK/jayos-equalizer-preset.built" "/usr/bin/jayos-equalizer-preset is the release build"
 same usr/lib/systemd/user/jayos-audio-denoise.service "$REPO/systemd/jayos-audio-denoise.service" "the unit"
+same usr/lib/systemd/user/jayos-audio-channels.service "$REPO/systemd/jayos-audio-channels.service" "the channel sink's unit"
 same usr/share/licenses/jayos-audio/LICENSE "$REPO/LICENSE" "this repository's LICENSE"
 same usr/share/licenses/jayos-audio/THIRD_PARTY.md "$REPO/THIRD_PARTY.md" "THIRD_PARTY.md"
 for f in LICENSE LICENSE-MIT LICENSE-APACHE; do
@@ -1019,6 +1102,7 @@ package_without "no LICENSE-APACHE in the fork fails, saying so" "could not inst
 package_without "no built .so fails, saying so" "build first" "$SO"
 package_without "no VERSION fails, saying so" "could not install VERSION" "$REPO/VERSION"
 package_without "no unit fails, saying so" "could not install the unit" "$REPO/systemd/jayos-audio-denoise.service"
+package_without "no channel sink unit fails, saying so" "could not install the channel sink's unit" "$REPO/systemd/jayos-audio-channels.service"
 package_without "no 1.x command fails, saying so" "could not install jayos-denoise" "$REPO/src/jayos-denoise"
 package_without "no release jayos-audio-state fails, saying so" "could not install jayos-audio-state; build first" \
     "$TOOLS/target/release/jayos-audio-state"

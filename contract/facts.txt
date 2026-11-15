@@ -6,5 +6,8 @@ headroom-mark ms for a quantum of
 source-name jayos_denoise_source
 capture-name jayos_denoise_capture
 unit-name jayos-audio-denoise.service
+channels-sink-name jayos_channels_sink
+channels-output-name jayos_channels_output
+channels-unit-name jayos-audio-channels.service
 floor-file /usr/share/pipewire/pipewire-pulse.conf.d/60-jayos-capture-latency.conf
 retired-preset denoise

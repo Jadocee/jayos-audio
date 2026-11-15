@@ -682,7 +682,16 @@ fn build_state(
     // source-output and no sink-input). tools/test-audio-state.sh asserts
     // source-outputs are never even asked for. A filter on pavucontrol's id
     // stood here, hiding a stream no server produces.
-    let apps = sink_inputs.iter().map(|s| format_node(s, false, true)).collect();
+    //
+    // Save one: the channel sink's playback side (pw_route::CHANNELS_OUTPUT)
+    // is a sink-input too, and a row for it would be a slider that moves the
+    // adjusted sound's level behind the device's own, under a name nobody
+    // started.
+    let apps = sink_inputs
+        .iter()
+        .filter(|s| prop(props(s), "node.name") != pw_route::CHANNELS_OUTPUT)
+        .map(|s| format_node(s, false, true))
+        .collect();
 
     // Monitors are left out -- every sink has one, and listing them put each
     // speaker on the Inputs tab -- EXCEPT the one that is the default source.
@@ -754,6 +763,11 @@ fn master_rows(
     }
     match behind_of(&default.name).and_then(|name| listed_device(rows, &name)) {
         Some(target) => Ok((default, target)),
+        None if default.name == pw_route::CHANNELS_SINK => Err(format!(
+            "the default {noun}, {}, is jayos-audio's channel adjustments, whose level is \
+             the device's it plays on, and that device could not be found",
+            default.name
+        )),
         None => Err(format!(
             "the default {noun}, {}, is one of EasyEffects' virtual devices, whose own level \
              and mute reach nothing, and the device behind it could not be found",
@@ -762,13 +776,27 @@ fn master_rows(
     }
 }
 
-/// The device behind an inert default: the link graph first, then EasyEffects'
-/// own record, which is all there is while its inactivity timer has unlinked
-/// the filters. `dump` and `rc` are what pw-dump printed and what the rc file
-/// holds, each asked for at most once per poll however many sides need them.
-fn behind(name: &str, side: Side, dump: &Value, rc: Option<&str>) -> Option<String> {
-    pw_route::device_behind(dump, name, side)
-        .or_else(|| rc.and_then(|text| pw_route::easyeffects_device(text, side)))
+/// The device behind an inert default: the link graph first, then the record
+/// of whoever made the device. EasyEffects' rc, which is all there is while its
+/// inactivity timer has unlinked the filters; and for jayos-audio's channel
+/// sink its own channels.state, which is all there is while its host restarts
+/// onto another device. `dump`, `rc` and `channels` are what pw-dump printed
+/// and what the two files hold, each asked for at most once per poll however
+/// many sides need them.
+fn behind(
+    name: &str,
+    side: Side,
+    dump: &Value,
+    rc: Option<&str>,
+    channels: Option<&str>,
+) -> Option<String> {
+    pw_route::device_behind(dump, name, side).or_else(|| {
+        if name == pw_route::CHANNELS_SINK {
+            channels.and_then(pw_route::channels_output)
+        } else {
+            rc.and_then(|text| pw_route::easyeffects_device(text, side))
+        }
+    })
 }
 
 // ── asking the sound server ──────────────────────────────────────────────────
@@ -1402,7 +1430,8 @@ fn master(side: Side) -> ExitCode {
     let answer = master_rows(rows, side, |name| {
         let dump = parse_dump(run("pw-dump", &[], budget.left()));
         let rc = std::fs::read_to_string(pw_route::easyeffects_rc()).ok();
-        behind(name, side, &dump, rc.as_deref())
+        let channels = std::fs::read_to_string(pw_route::channels_state()).ok();
+        behind(name, side, &dump, rc.as_deref(), channels.as_deref())
     });
     match answer {
         Ok((default_row, target)) => emit::json(&Master {
@@ -1504,13 +1533,18 @@ fn main() -> ExitCode {
     if sink_name.is_some() || source_name.is_some() {
         let dump = parse_dump(run("pw-dump", &[], budget.left()));
         let rc = std::fs::read_to_string(pw_route::easyeffects_rc()).ok();
+        let channels = std::fs::read_to_string(pw_route::channels_state()).ok();
         if let Some(name) = sink_name {
-            if let Some(device) = behind(&name, Side::Sink, &dump, rc.as_deref()) {
+            if let Some(device) =
+                behind(&name, Side::Sink, &dump, rc.as_deref(), channels.as_deref())
+            {
                 route_through(&mut state.outputs, &device);
             }
         }
         if let Some(name) = source_name {
-            if let Some(device) = behind(&name, Side::Source, &dump, rc.as_deref()) {
+            if let Some(device) =
+                behind(&name, Side::Source, &dump, rc.as_deref(), channels.as_deref())
+            {
                 route_through(&mut state.inputs, &device);
             }
         }
@@ -2861,14 +2895,67 @@ id 52, type PipeWire:Interface:Node
         ]);
         let rc = "[StreamOutputs]\noutputDevice=alsa_output.headphones\n";
         assert_eq!(
-            behind("easyeffects_sink", Side::Sink, &dump, Some(rc)).as_deref(),
+            behind("easyeffects_sink", Side::Sink, &dump, Some(rc), None).as_deref(),
             Some("alsa_output.speakers")
         );
         assert_eq!(
-            behind("easyeffects_sink", Side::Sink, &json!([]), Some(rc)).as_deref(),
+            behind("easyeffects_sink", Side::Sink, &json!([]), Some(rc), None).as_deref(),
             Some("alsa_output.headphones")
         );
-        assert_eq!(behind("easyeffects_sink", Side::Sink, &json!([]), None), None);
+        assert_eq!(behind("easyeffects_sink", Side::Sink, &json!([]), None, None), None);
+    }
+
+    #[test]
+    fn the_channel_sinks_playback_side_is_not_an_application() {
+        let inputs = vec![
+            json!({"index": 7, "properties": {"application.name": "Firefox", "node.name": "Firefox"},
+                   "volume": {"front-left": {"value_percent": "50%"}}, "mute": false}),
+            json!({"index": 8, "properties": {"application.name": "pipewire",
+                                               "node.name": "jayos_channels_output"},
+                   "volume": {"front-left": {"value_percent": "100%"}}, "mute": false}),
+        ];
+        let state = build_state(&[], &[], &inputs, "", "");
+        assert_eq!(state.apps.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["7"]);
+    }
+
+    #[test]
+    fn the_channel_sink_falls_back_to_its_own_record_never_easyeffects() {
+        // Its host restarting onto another device: no playback side in the
+        // graph, so the record jayos-audio wrote is the answer -- and never
+        // EasyEffects' outputDevice, which names the channel sink itself
+        // while EasyEffects follows it as the default.
+        let rc = "[StreamOutputs]\noutputDevice=jayos_channels_sink\n";
+        let record = "mono=on\nswap=off\nbalance=0\noutput=alsa_output.headphones\n";
+        assert_eq!(
+            behind("jayos_channels_sink", Side::Sink, &json!([]), Some(rc), Some(record))
+                .as_deref(),
+            Some("alsa_output.headphones")
+        );
+        assert_eq!(behind("jayos_channels_sink", Side::Sink, &json!([]), Some(rc), None), None);
+        // And EasyEffects' own device never reads the channel record.
+        assert_eq!(behind("easyeffects_sink", Side::Sink, &json!([]), None, Some(record)), None);
+    }
+
+    #[test]
+    fn the_channel_sink_as_default_puts_the_hero_on_the_device_it_plays_on() {
+        let sinks = vec![
+            sink(49, "alsa_output.headphones", "Headphones", "70%"),
+            sink(120, "jayos_channels_sink", "Headphones (adjusted)", "100%"),
+        ];
+        let state = build_state(&sinks, &[], &[], "jayos_channels_sink", "");
+        assert_eq!(state.outputs.iter().map(|o| o.inert).collect::<Vec<_>>(), vec![false, true]);
+        let rows = &state.outputs;
+        let (default, target) = master_rows(rows, Side::Sink, |name| {
+            assert_eq!(name, "jayos_channels_sink");
+            Some("alsa_output.headphones".to_string())
+        })
+        .expect("a target");
+        assert_eq!(
+            (default.name.as_str(), target.name.as_str()),
+            ("jayos_channels_sink", "alsa_output.headphones")
+        );
+        let refused = master_rows(rows, Side::Sink, |_| None).unwrap_err();
+        assert!(refused.contains("jayos-audio's channel adjustments"), "{refused}");
     }
 
     #[test]
@@ -2892,7 +2979,8 @@ id 52, type PipeWire:Interface:Node
         let rc = "[StreamOutputs]\noutputDevice=alsa_output.headphones\n";
         assert_eq!(parse(Some(text.clone())), json!([]), "one document refuses it");
         assert_eq!(
-            behind("easyeffects_sink", Side::Sink, &parse_dump(Some(text)), Some(rc)).as_deref(),
+            behind("easyeffects_sink", Side::Sink, &parse_dump(Some(text)), Some(rc), None)
+                .as_deref(),
             Some("alsa_output.speakers")
         );
         assert_eq!(parse_dump(None), json!([]));
