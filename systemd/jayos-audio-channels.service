@@ -1,0 +1,24 @@
+# The sound adjusted: balance, mono and left/right swap, in a PipeWire
+# filter-chain sink hosted by a PipeWire client of its own, with a watcher
+# beside it that keeps the sink the default and plays on the device a person
+# chooses. `jayos-audio channels set` enables and starts it while any
+# adjustment is on, and stops and disables it when none is; src/jayos-audio,
+# THE CHANNEL SINK, says why it is a sink and not EasyEffects.
+[Unit]
+Description=jayos-audio: balance, mono and left/right swap
+# WirePlumber links the playback side, so the host waits for it, as the
+# noise-suppression host does.
+After=pipewire.service wireplumber.service
+Requires=pipewire.service
+Wants=wireplumber.service
+# The filter-chain loses its connection when PipeWire goes, so it goes with it.
+PartOf=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/jayos-audio/jayos-audio channels host
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

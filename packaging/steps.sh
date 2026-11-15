@@ -511,10 +511,12 @@ step_package() {
             || die "could not install $b; build first"
     done
 
-    # The noise-suppression host's unit, a user unit, where systemd's user
-    # manager reads a package's own.
+    # The two hosts' units, the noise suppression's and the channel sink's,
+    # user units, where systemd's user manager reads a package's own.
     install -Dm644 "$ROOT/systemd/jayos-audio-denoise.service" -t "$pkgdir/usr/lib/systemd/user/" \
         || die "could not install the unit"
+    install -Dm644 "$ROOT/systemd/jayos-audio-channels.service" -t "$pkgdir/usr/lib/systemd/user/" \
+        || die "could not install the channel sink's unit"
 
     # PipeWire's and WirePlumber's drop-ins, in their packages' own
     # directories: read before /etc and ~/.config, so that a file of a

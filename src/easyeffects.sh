@@ -28,8 +28,9 @@
 #   easyeffects.sh defaults [--check]  put back the settings this configuration relies on:
 #                                      nine at EasyEffects' own defaults, recordings not
 #                                      processed, a preset's blocklist not loaded over
-#                                      ours, and the voice-chat applications and games on
-#                                      the output blocklist; --check only names those
+#                                      ours, and the voice-chat applications, games and
+#                                      the channel sink's playback on the output
+#                                      blocklist; --check only names those
 #                                      that differ, and exits 1 when any does
 #   easyeffects.sh game-env            the environment, one NAME=value a line, that marks
 #                                      every stream a game launcher's processes play as a
@@ -178,8 +179,8 @@ json_strings() { # json_strings <string>...
 #                                  source all session, in the one data thread the
 #                                  equaliser runs in, with nobody hearing them
 #
-# Three more are set away from EasyEffects' defaults, in WANTED, VOICE_APPS
-# and GAME_APPS below. Every other key is left as it is: the presets loaded and their
+# Three more are set away from EasyEffects' defaults, in WANTED, VOICE_APPS,
+# GAME_APPS and OWN_STREAMS below. Every other key is left as it is: the presets loaded and their
 # plugins, the devices EasyEffects names, the input blocklist, the window.
 # Those are EasyEffects' state or somebody's choice, and nothing here depends
 # on their value.
@@ -311,6 +312,16 @@ GAME_APPS=(
     wine
     steam
     "$GAME_TAG"
+)
+
+# This package's own: the playback side of the channel sink (jayos-audio's
+# THE CHANNEL SINK), which plays the adjusted sound on the device. While the
+# sink is the default, EasyEffects plays into it; moved into EasyEffects'
+# own sink, that playback would come back round to it, a loop that howls.
+# The sink's watcher undoes such a move, and this keeps EasyEffects from
+# making it. Merged as the others are.
+OWN_STREAMS=(
+    jayos_channels_output
 )
 
 # The environment that tags a game launcher's streams, one NAME=value a line.
@@ -517,8 +528,8 @@ wanted_deviations() {
 }
 
 # The output blocklist as KConfig keeps a string list: entries joined by `,`,
-# a `,` inside one escaped as `\,`. The entries of VOICE_APPS and GAME_APPS it
-# lacks, one per line, compared whole and as written -- each of ours holds no
+# a `,` inside one escaped as `\,`. The entries of VOICE_APPS, GAME_APPS and
+# OWN_STREAMS it lacks, one per line, compared whole and as written -- each of ours holds no
 # `,` or `\`, so an entry of the person's that spells one of ours exactly is
 # ours.
 blocklist_raw() { rc_get StreamOutputs blocklist || true; }
@@ -533,7 +544,7 @@ blocklist_missing() {
     # its first match can fail the printf it reads, and a match read as none.
     local list
     list=$(printf '%s\n' "${have[@]}")
-    for entry in "${VOICE_APPS[@]}" "${GAME_APPS[@]}"; do
+    for entry in "${VOICE_APPS[@]}" "${GAME_APPS[@]}" "${OWN_STREAMS[@]}"; do
         grep -qxF -- "$entry" <<<"$list" || printf '%s\n' "$entry"
     done
 }
@@ -994,7 +1005,7 @@ case "${1:-status}" in
                 differs=1
             done <<<"$wanted"
             if [[ -n "$missing" ]]; then
-                printf "[StreamOutputs] blocklist lacks %d voice-chat application(s) and game(s): %s\n" \
+                printf "[StreamOutputs] blocklist lacks %d voice-chat application(s), game(s) and stream(s) of jayos-audio's: %s\n" \
                     "$(grep -c . <<<"$missing")" "$(paste -sd' ' <<<"$missing")"
                 differs=1
             fi
@@ -1062,7 +1073,7 @@ case "${1:-status}" in
                     [[ -n "$group" ]] && printf "[%s] %s was %s; now %s, which this configuration sets\n" \
                         "$group" "$key" "$value" "$want"
                 done <<<"$wanted"
-                [[ -n "$missing" ]] && printf "[StreamOutputs] blocklist: added %d voice-chat application(s) and game(s), kept the rest: %s\n" \
+                [[ -n "$missing" ]] && printf "[StreamOutputs] blocklist: added %d voice-chat application(s), game(s) and stream(s) of jayos-audio's, kept the rest: %s\n" \
                     "$(grep -c . <<<"$missing")" "$(paste -sd' ' <<<"$missing")"
             else
                 echo "could not write $EE_RC; recordings may still go through EasyEffects" >&2

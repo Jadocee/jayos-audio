@@ -9,6 +9,10 @@ drop-in the package installs, each with its reason in its header.
 `docs/DEEPFILTERNET.md` is the plugin's account and 1.x's, and is history
 where it describes an EasyEffects preset.
 
+Since 2026-11-15 the package also adjusts what plays: balance, mono and
+left/right swap, in a sink of its own (*Balance, mono and left/right swap*,
+below).
+
 Nothing here has run on an Arch machine, in a call, or with a person
 listening. What has run is said where it is claimed, and the last section
 draws the line.
@@ -176,6 +180,101 @@ microphone was given 480/48000 and the graph ran at 256 frames without the
 file; with it, 1024/48000 and 1024; a 10 ms playback was given 128/48000
 either way. JayOS shipped the file in `~/.config` and the helper as
 `hypr/pulse-latency.sh` from 2026-11-07 until this package took them.
+
+## Balance, mono and left/right swap
+
+The review of Serpantinum on 2026-11-14 (JayOS's `docs/REVIEW.md`) found
+three settings JayOS lacked and left them here, as the audio's: balance, mono,
+and the two channels swapped -- for a person who hears better on one side, or
+with one ear. `jayos-audio channels set mono=on|off swap=on|off
+balance=<-100..100>` takes any of them; JayOS's settings hand all three over
+(its `hypr/audio-channels.sh`).
+
+**Where it happens.** A second filter-chain host, `jayos-audio channels host`
+under `systemd/jayos-audio-channels.service`, makes a stereo sink,
+`jayos_channels_sink`. Each of its two inputs feeds two of PipeWire's builtin
+`mixer`s, one per output channel, through `copy` nodes (a filter-chain's graph
+input feeds one port, and PipeWire's own `filter-chain/sink-make-LFE.conf`
+fans out the same way), and the four gains are the adjustments:
+
+| | left from left | left from right | right from left | right from right |
+|---|---|---|---|---|
+| nothing on | 1 | 0 | 0 | 1 |
+| mono | ½ | ½ | ½ | ½ |
+| swap | 0 | 1 | 1 | 0 |
+| balance *b* | the left's gains × (1 − *b*/100) where *b* > 0 | | the right's × (1 + *b*/100) where *b* < 0 | |
+
+Mono is each side the mean of both: a voice panned hard left reaches both
+sides at half its level, and a centred one keeps its own. Swap does nothing
+to mono. Balance turns the far side down linearly, to nothing at ±100. A
+change while the host runs on the same device is set live, through `pw-cli
+set-param` on the sink's control params, as `denoise strength` sets the
+filter's; nothing restarts.
+
+**Why a sink, and the default.** While any of the three is on, the sink is
+`default.configured.audio.sink`, so everything that plays to the default
+plays through it, and its playback side plays on the device the person chose,
+by `target.object`. EasyEffects follows the default output too, so its
+effects come out through the adjustments. The two alternatives each miss
+someone: EasyEffects' Stereo Tools would leave out everything its blocklist
+keeps off the effects -- voice chat and games (*The settings an install puts
+back*) -- and a person who needs mono needs it in a call most of all; and a
+device's own channel volumes hold a balance only until the next volume key,
+which sets both channels to one level, and a device has no mono or swap at
+all. With nothing on, the host is stopped and the device is the default again.
+
+**A person choosing a device.** A volume popup or pavucontrol choosing a
+device writes it into `default.configured.audio.sink`, which would take the
+sink out of the path with the adjustments still on. So the host runs a
+watcher beside itself, in its unit's control group: it reads the default
+metadata as it changes (`pw-metadata -m`), moves the playback side onto a
+device a person chooses, and makes the sink the default again. Its own writes
+come back to it and are no-ops. It starts reading only once the playback side
+exists: a metadata client sees a change on a node only where the node existed
+when the client connected (RUN on PipeWire 1.0.5 -- a monitor started before
+the host printed none of the playback side's `target.object` changes, and one
+started after printed each).
+
+**Never a loop.** EasyEffects plays into the default, which is the sink, so
+the sink's playback side moved into `easyeffects_sink` would come back round
+to it and howl. Three things stand against it: the playback side is on
+EasyEffects' output blocklist (`OWN_STREAMS` in `src/easyeffects.sh`, merged
+by `defaults` as the voice-chat applications are); the watcher undoes any
+move of the playback side to anywhere but the device it plays on; and
+`easyeffects_sink` is never taken as a device to play on. `node.dont-move` is
+not among them: WirePlumber 0.4.17 moved a stream that carried it, by
+metadata, all the same (RUN).
+
+**The volume popup.** The sink's own level works -- it is a stream's software
+volume -- but a volume key that moved it would stack a second level on the
+device's, and turning the adjustments off would take that level away with the
+sink, so the sound would jump. `jayos-audio-state` treats it as EasyEffects'
+inert devices are (*EasyEffects' own devices, and what the volume controls act
+on*, below): its row has no slider, and the hero and every volume key act on
+the device it plays on. `pw_route::device_behind` reaches that device through
+the filter-chain's `node.link-group`, since what passes between a
+filter-chain's two sides passes inside its process, where no link shows it;
+and while the host restarts, the device is the one `channels.state` records.
+The playback side is no application, so it is left out of the popup's
+application list.
+
+**What it costs.** One more PipeWire client, and a copy and two mixer nodes
+per cycle: four multiply-adds a frame. A device a person chooses while it runs
+is not used until it is chosen: plugging in headphones WirePlumber would have
+switched to on its own leaves the sound where it was, since the configured
+default is the sink and the sink is there.
+
+**What has run.** `tests/shell/test-channels.sh` runs every verb against
+stand-ins for systemd's user manager and PipeWire's tools, and under a real
+PipeWire 1.0.5 and WirePlumber 0.4.17, in a box with two stand-in devices, a
+440 Hz tone played into the default output and recorded at the device: in the
+left alone, mono gave both sides half (RMS within 10% of 5793 of 32767's
+scale each), swap the right alone, and balance −50, with the tone in both, the
+left whole and the right at half; a device chosen while it ran was moved onto
+and heard the adjustment, the sink the default again; a stray move of the
+playback side was undone; and with nothing on, the device was the default
+again and the sink gone. Read, not run: WirePlumber 0.5, EasyEffects playing
+into the sink, a person's ears, and a real device.
 
 ## The two programs JayOS's controls read
 
@@ -497,7 +596,7 @@ among its rows, at true, until 2026-11-11.
 |---|---|---|---|
 | `EffectsPipelines` | `processAllInputs` | false | no recording through EasyEffects: with it on, every recording ran through the input preset in EasyEffects' one data thread, beside every output effect, and the microphone lagged and cut out in calls with the Effects switch on (*The microphone leaves EasyEffects*, below). The noise filter is jayos-audio's own filter-chain now |
 | `Presets` | `ignorePresetBlocklist` | true | a preset loaded leaves the blocklist below as it is. Off, EasyEffects puts each preset's own blocklist in its place as it loads it, and an empty one where the preset has none (`Manager::load_blocklist`, `src/presets_manager.cpp` at v8.3.2, read). Every preset the equaliser writes carries `"blocklist": []`, so the first one picked put every application below back on the effects |
-| `StreamOutputs` | `blocklist` | the voice-chat applications and the games, merged in | a call's far end and a game's own mix kept off the output effects: serpantinum-audio's list, Element, Steam's voice chat and Signal, each as EasyEffects may match it, and Wine, Steam and the game tag (below) |
+| `StreamOutputs` | `blocklist` | the voice-chat applications, the games and the channel sink's playback side, merged in | a call's far end and a game's own mix kept off the output effects: serpantinum-audio's list, Element, Steam's voice chat and Signal, each as EasyEffects may match it, and Wine, Steam and the game tag (below); and `jayos_channels_output`, which moved into EasyEffects' sink would play back into itself (*Balance, mono and left/right swap*) |
 
 `WANTED`, `VOICE_APPS` and `GAME_APPS` in `hypr/easyeffects.sh` are the
 three, and the suite holds a copy of each. EasyEffects keeps an output stream off its effects when

@@ -118,6 +118,18 @@ generate() { # generate <dir>
       printf '%s\n' "$keys"
     } > "$dir/status-keys.txt"
 
+    # The channel sink's: its status keys with nothing set, and its host's
+    # configuration with nothing set and no device chosen, as a first start
+    # writes it.
+    keys=$(env -i PATH="$PATH" HOME="$WORK" XDG_STATE_HOME="$WORK/state" "$ENGINE" channels status \
+           | jq -r 'keys_unsorted[]') || die "jayos-audio channels status failed"
+    [[ -n "$keys" ]] || die "jayos-audio channels status printed no keys"
+    { header "The keys of jayos-audio channels status, in its order." "jayos-audio channels status"
+      printf '%s\n' "$keys"
+    } > "$dir/channels-status-keys.txt"
+    env -i PATH="$PATH" HOME="$WORK" XDG_STATE_HOME="$WORK/state" "$ENGINE" channels config \
+        > "$dir/config.channels.conf" || die "jayos-audio channels config failed"
+
     dirs=$(sed -n -E 's/^LADSPA_DIRS="([^"]*)"$/\1/p' "$ENGINE")
     [[ -n "$dirs" && "$dirs" != *$'\n'* ]] || die "could not read one LADSPA_DIRS out of $ENGINE"
     mark=$(cat "$ROOT"/packaging/patches/*.patch 2>/dev/null \
@@ -138,6 +150,9 @@ generate() { # generate <dir>
       printf 'source-name %s\n' "$(value SOURCE)"
       printf 'capture-name %s\n' "$(value CAPTURE)"
       printf 'unit-name %s\n' "$(value UNIT)"
+      printf 'channels-sink-name %s\n' "$(value CH_SINK)"
+      printf 'channels-output-name %s\n' "$(value CH_OUTPUT)"
+      printf 'channels-unit-name %s\n' "$(value CH_UNIT)"
       printf 'floor-file %s\n' "$(sed -n -E 's/^DROPIN="\$\{JAYOS_AUDIO_FLOOR:-([^}]*)\}"$/\1/p' "$ENGINE")"
       printf 'retired-preset %s\n' denoise
     } > "$dir/facts.txt"

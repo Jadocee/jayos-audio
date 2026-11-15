@@ -958,6 +958,7 @@ want=$( {
         "f 755 usr/bin/jayos-audio-state" \
         "f 755 usr/bin/jayos-equalizer-preset" \
         "f 644 usr/lib/systemd/user/jayos-audio-denoise.service" \
+        "f 644 usr/lib/systemd/user/jayos-audio-channels.service" \
         "f 755 usr/lib/ladspa/libdeep_filter_ladspa.so" \
         "f 644 usr/share/licenses/jayos-audio/LICENSE" \
         "f 644 usr/share/licenses/jayos-audio/THIRD_PARTY.md" \
@@ -1061,6 +1062,7 @@ same usr/lib/jayos-audio/VERSION "$REPO/VERSION" "VERSION"
 same usr/bin/jayos-audio-state "$WORK/jayos-audio-state.built" "/usr/bin/jayos-audio-state is the release build"
 same usr/bin/jayos-equalizer-preset "$WORK/jayos-equalizer-preset.built" "/usr/bin/jayos-equalizer-preset is the release build"
 same usr/lib/systemd/user/jayos-audio-denoise.service "$REPO/systemd/jayos-audio-denoise.service" "the unit"
+same usr/lib/systemd/user/jayos-audio-channels.service "$REPO/systemd/jayos-audio-channels.service" "the channel sink's unit"
 same usr/share/licenses/jayos-audio/LICENSE "$REPO/LICENSE" "this repository's LICENSE"
 same usr/share/licenses/jayos-audio/THIRD_PARTY.md "$REPO/THIRD_PARTY.md" "THIRD_PARTY.md"
 for f in LICENSE LICENSE-MIT LICENSE-APACHE; do
@@ -1100,6 +1102,7 @@ package_without "no LICENSE-APACHE in the fork fails, saying so" "could not inst
 package_without "no built .so fails, saying so" "build first" "$SO"
 package_without "no VERSION fails, saying so" "could not install VERSION" "$REPO/VERSION"
 package_without "no unit fails, saying so" "could not install the unit" "$REPO/systemd/jayos-audio-denoise.service"
+package_without "no channel sink unit fails, saying so" "could not install the channel sink's unit" "$REPO/systemd/jayos-audio-channels.service"
 package_without "no 1.x command fails, saying so" "could not install jayos-denoise" "$REPO/src/jayos-denoise"
 package_without "no release jayos-audio-state fails, saying so" "could not install jayos-audio-state; build first" \
     "$TOOLS/target/release/jayos-audio-state"
