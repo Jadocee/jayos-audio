@@ -50,6 +50,22 @@ pub const EASYEFFECTS_APP_ID: &str = "com.github.wwmm.easyeffects";
 /// (tags::pipewire::ee_sink_name / ee_source_name, READ).
 pub const EASYEFFECTS_NODES: [&str; 2] = ["easyeffects_sink", "easyeffects_source"];
 
+/// The sink jayos-audio's channel adjustments make the default while one is
+/// on (`jayos-audio channels`, src/jayos-audio): balance, mono and left/right
+/// swap, in a PipeWire filter-chain whose playback side plays on the device a
+/// person chose. Its own level works -- it is a stream's software volume --
+/// but a volume key that moved it would stack a second level on the device's,
+/// and turning the adjustments off would take that level away with the sink:
+/// the sound jumps by however far the person had moved it. So it is inert to
+/// the popup, as EasyEffects' devices are, and its controls act on the device
+/// it plays on, which [`device_behind`] reaches through the filter-chain's
+/// link group.
+pub const CHANNELS_SINK: &str = "jayos_channels_sink";
+
+/// That filter-chain's playback side: a stream playing on the device, which is
+/// the channel sink's own plumbing and no application's.
+pub const CHANNELS_OUTPUT: &str = "jayos_channels_output";
+
 /// Which way from the virtual device the real one lies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -100,6 +116,9 @@ pub fn inert(props: Option<&Map<String, Value>>, name: &str) -> bool {
     // PipeWire sets, and the suffix is what pactl names every monitor.
     if prop(props, "device.class") == "monitor" || name.ends_with(".monitor") {
         return false;
+    }
+    if name == CHANNELS_SINK {
+        return true;
     }
     let easyeffects =
         prop(props, "application.id") == EASYEFFECTS_APP_ID || EASYEFFECTS_NODES.contains(&name);
@@ -183,6 +202,12 @@ pub fn device_behind(dump: &Value, name: &str, side: Side) -> Option<String> {
     let mut class_of: HashMap<u64, (&str, &str)> = HashMap::new();
     let mut start = None;
     let mut next_of: HashMap<u64, Vec<u64>> = HashMap::new();
+    // The nodes of one filter-chain share a node.link-group, and what passes
+    // between its capture and its playback side passes inside the process,
+    // where no link shows it. So an inert node's group is the way on.
+    let mut group_of: HashMap<u64, &str> = HashMap::new();
+    let mut members: HashMap<&str, Vec<u64>> = HashMap::new();
+    let mut inert_ids: HashSet<u64> = HashSet::new();
 
     for object in objects {
         let kind = object.get("type").and_then(Value::as_str).unwrap_or("");
@@ -195,6 +220,14 @@ pub fn device_behind(dump: &Value, name: &str, side: Side) -> Option<String> {
                 let props = info.and_then(|i| i.get("props")).and_then(Value::as_object);
                 let node_name = prop(props, "node.name");
                 class_of.insert(id, (node_name, prop(props, "media.class")));
+                let group = prop(props, "node.link-group");
+                if !group.is_empty() {
+                    group_of.insert(id, group);
+                    members.entry(group).or_default().push(id);
+                }
+                if inert(props, node_name) {
+                    inert_ids.insert(id);
+                }
                 if node_name == name && start.is_none() {
                     start = Some(id);
                 }
@@ -220,6 +253,19 @@ pub fn device_behind(dump: &Value, name: &str, side: Side) -> Option<String> {
     let mut found: BTreeSet<&str> = BTreeSet::new();
 
     while let Some(node) = frontier.pop() {
+        // An inert node's own filter-chain, the rest of its link group: the
+        // playback side of jayos-audio's channel sink, which plays on the
+        // device. Taken whatever their class, since a filter-chain's playback
+        // side is a stream, which a walk otherwise stops at.
+        let peers: Vec<u64> = match (inert_ids.contains(&node), group_of.get(&node)) {
+            (true, Some(group)) => members.get(group).into_iter().flatten().copied().collect(),
+            _ => Vec::new(),
+        };
+        for &next in &peers {
+            if seen.len() < MAX_NODES && seen.insert(next) {
+                frontier.push(next);
+            }
+        }
         for &next in next_of.get(&node).into_iter().flatten() {
             if seen.len() >= MAX_NODES || !seen.insert(next) {
                 continue;
@@ -227,7 +273,10 @@ pub fn device_behind(dump: &Value, name: &str, side: Side) -> Option<String> {
             let Some(&(next_name, class)) = class_of.get(&next) else {
                 continue;
             };
-            if class.is_empty() {
+            if class.is_empty() || (inert_ids.contains(&next) && ends_walk(class, side)) {
+                // A filter, or an inert device of this side -- EasyEffects'
+                // output chain playing into the channel sink -- which is not
+                // where the sound ends.
                 frontier.push(next);
             } else if ends_walk(class, side) {
                 found.insert(next_name);
@@ -239,6 +288,30 @@ pub fn device_behind(dump: &Value, name: &str, side: Side) -> Option<String> {
         (1, Some(device)) if !device.is_empty() => Some(device.to_string()),
         _ => None,
     }
+}
+
+/// jayos-audio's record of its channel adjustments:
+/// `$XDG_STATE_HOME/jayos-audio/channels.state`, `key=value` lines, as
+/// src/jayos-audio's `ch_get` reads it.
+pub fn channels_state() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::paths::home().join(".local/state"))
+        .join("jayos-audio/channels.state")
+}
+
+/// The device the channel sink plays on, from that record: its `output`, the
+/// last one written. What a walk cannot find while the host restarts onto
+/// another device, when its playback side is not in the graph.
+pub fn channels_output(state: &str) -> Option<String> {
+    state
+        .lines()
+        .filter_map(|line| line.strip_prefix("output="))
+        .last()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /// EasyEffects' rc file: `$XDG_CONFIG_HOME/easyeffects/db/easyeffectsrc`, the
@@ -610,5 +683,101 @@ outputDevice=alsa_output.speakers
         // A second document cut off by the timeout keeps the first.
         let cut = format!("{}\n[{{\"id\": 110, \"in", Value::Array(easyeffects_graph()));
         assert_eq!(parse_dump(&cut), Some(Value::Array(easyeffects_graph())));
+    }
+
+    /// jayos-audio's channel sink in pw-dump's shape: a filter-chain whose
+    /// capture side is the sink and whose playback side, a stream in the same
+    /// link group, plays on the headphones -- a group with no link between
+    /// its two sides, as PipeWire 1.0.5 printed the box's.
+    fn channels_node(id: u64, name: &str, class: &str) -> Value {
+        json!({ "id": id, "type": "PipeWire:Interface:Node", "info": { "props": {
+            "node.name": name, "media.class": class,
+            "node.link-group": "filter-chain-4242-12", "object.serial": id + 100 } } })
+    }
+
+    fn channels_graph() -> Vec<Value> {
+        let mut graph = easyeffects_graph();
+        graph.retain(|o| {
+            !(o["type"] == "PipeWire:Interface:Link"
+                && o["id"].as_u64() >= Some(206)
+                && o["id"].as_u64() <= Some(207))
+        });
+        graph.push(channels_node(120, CHANNELS_SINK, "Audio/Sink"));
+        graph.push(channels_node(121, "jayos_channels_output", "Stream/Output/Audio"));
+        // EasyEffects' chain into the channel sink, its playback side into
+        // the headphones
+        graph.push(link(240, 81, 120));
+        graph.push(link(241, 81, 120));
+        graph.push(link(242, 121, 49));
+        graph.push(link(243, 121, 49));
+        graph
+    }
+
+    #[test]
+    fn the_channel_sink_is_inert_and_its_monitor_is_not() {
+        assert!(inert(None, CHANNELS_SINK));
+        let monitor = json!({ "device.class": "monitor" });
+        assert!(!inert(monitor.as_object(), CHANNELS_SINK));
+        assert!(!inert(None, "jayos_channels_sink.monitor"));
+        assert!(!inert(None, "jayos_channels_output"));
+    }
+
+    #[test]
+    fn the_channel_sink_resolves_through_its_link_group_to_the_device() {
+        let dump = Value::Array(channels_graph());
+        assert_eq!(
+            device_behind(&dump, CHANNELS_SINK, Side::Sink).as_deref(),
+            Some("alsa_output.headphones")
+        );
+    }
+
+    #[test]
+    fn easyeffects_into_the_channel_sink_resolves_past_it() {
+        // The channel sink is the default, so EasyEffects follows it there:
+        // its device is the one the channel sink plays on, not the sink.
+        let dump = Value::Array(channels_graph());
+        assert_eq!(
+            device_behind(&dump, "easyeffects_sink", Side::Sink).as_deref(),
+            Some("alsa_output.headphones")
+        );
+    }
+
+    #[test]
+    fn a_link_group_is_crossed_only_from_an_inert_node() {
+        // Another filter-chain's sink -- a person's equaliser -- is a device
+        // of its own, where the walk ends, whatever group it is in.
+        let mut graph = channels_graph();
+        for o in graph.iter_mut() {
+            if o["id"] == 120 {
+                o["info"]["props"]["node.name"] = json!("someones_eq_sink");
+            }
+        }
+        let dump = Value::Array(graph);
+        assert_eq!(
+            device_behind(&dump, "easyeffects_sink", Side::Sink).as_deref(),
+            Some("someones_eq_sink")
+        );
+        assert_eq!(device_behind(&dump, "someones_eq_sink", Side::Sink), None);
+    }
+
+    #[test]
+    fn a_channel_sink_whose_playback_side_is_not_linked_resolves_to_nothing() {
+        let mut graph = channels_graph();
+        graph.retain(|o| !(o["id"] == 242 || o["id"] == 243));
+        let dump = Value::Array(graph);
+        assert_eq!(device_behind(&dump, CHANNELS_SINK, Side::Sink), None);
+    }
+
+    #[test]
+    fn the_channel_record_names_its_last_output() {
+        assert_eq!(
+            channels_output(
+                "mono=on\noutput=alsa_output.speakers\nbalance=0\noutput=alsa_output.headphones\n"
+            )
+            .as_deref(),
+            Some("alsa_output.headphones")
+        );
+        assert_eq!(channels_output("mono=on\noutput=\n"), None);
+        assert_eq!(channels_output(""), None);
     }
 }

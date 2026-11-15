@@ -9,6 +9,11 @@ jayos-audio denoise input [node.name]
 jayos-audio denoise config [strength]
 jayos-audio denoise strengths
 jayos-audio denoise host
+jayos-audio channels status
+jayos-audio channels set [mono=on|off] [swap=on|off] [balance=<-100..100>]
+jayos-audio channels output [node.name]
+jayos-audio channels config
+jayos-audio channels host
 jayos-audio floor status|apply
 jayos-audio realtime
 jayos-audio easyeffects <verb> [args]

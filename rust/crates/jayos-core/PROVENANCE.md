@@ -13,7 +13,7 @@ leaves out `now_unix`, which neither program calls. Its header says so.
 | | |
 |---|---|
 | Repository | `https://github.com/Jadocee/jayos` |
-| Commit | `45256e088ee133c177cc805248e43188edd87cfd` (2026-11-11) |
+| Commit | `0871e22e5bb5576887e9be9fe793dfc36c8401e8` (2026-11-15) |
 | Branch it was taken from | `ccr-3147b012-y550t7` |
 | Path there | `rust/crates/jayos-core/` |
 
@@ -24,7 +24,7 @@ leaves out `now_unix`, which neither program calls. Its header says so.
 | `src/emit.rs` | `e8b751ce39bb5f7af9119f8c9cef849764a3fb45f5c2a6c6268bdadf8ddcde76` |
 | `src/paths.rs` | `505ce599d886933a96dbd03f971cd4a26d157dd99443e16d257c6307e3ab17d6` |
 | `src/proc.rs` | `7b2c10a951111cfdd05683c072f00c05ce0a0b7c31a3b77e7bbc7233bd4601cc` |
-| `src/pw_route.rs` | `b78287c5f809c5bd69d4b51b90f49c45aa6263bad78e8ce810d2445dc89ad294` |
+| `src/pw_route.rs` | `b7d4610ba4318e6e14072badf66f6caa774fe8d6672c7110264d6c13e96fbeb3` |
 
 `Cargo.toml` takes its version, edition, rust-version and licence from the
 workspace, so the same bytes say 2.0.0 here, the package's version, and 1.0.0

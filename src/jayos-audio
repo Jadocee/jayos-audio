@@ -17,6 +17,17 @@
 #   jayos-audio denoise config [strength]    print the host configuration
 #   jayos-audio denoise strengths            the strength names, one per line
 #   jayos-audio denoise host                 run the host (the unit's ExecStart)
+#   jayos-audio channels status              JSON, one line (keys below)
+#   jayos-audio channels set [mono=on|off] [swap=on|off] [balance=<-100..100>]
+#                                            the adjustments to what plays: any
+#                                            of the three, the rest kept; with
+#                                            any on, every output plays through
+#                                            the channel sink, and with none on
+#                                            it is stopped
+#   jayos-audio channels output [node.name]  print, or set, the device the
+#                                            adjusted sound plays on
+#   jayos-audio channels config              print the channel host's configuration
+#   jayos-audio channels host                run the channel host (its unit's ExecStart)
 #   jayos-audio floor status|apply           whether pipewire-pulse has the
 #                                            recording floor; apply restarts one
 #                                            that predates it where nothing streams
@@ -66,17 +77,56 @@
 # input, source, isDefault and host.
 #
 # Nothing here reads a desktop's settings: JayOS's hypr/denoise.sh owns
-# micDenoise and micDenoiseStrength and tells this on or off.
+# micDenoise and micDenoiseStrength and tells this on or off, and its
+# hypr/audio-channels.sh owns the three adjustments and hands them to
+# `channels set`.
+#
+# THE CHANNEL SINK. Balance, mono and left/right swap, for a person who hears
+# better on one side or with one ear: Serpantinum's audio settings have the
+# three, and JayOS had none (its docs/REVIEW.md, the review of Serpantinum,
+# 2026-11-14). A second filter-chain host, jayos-audio-channels.service, makes
+# a stereo sink, jayos_channels_sink, whose two inputs each feed two of
+# PipeWire's builtin mixers, one per output channel; the four gains are the
+# adjustments, set live with pw-cli as `denoise strength` sets the filter's.
+# While any of the three is on the sink is the default output, so everything
+# plays through it -- EasyEffects too, which follows the default -- and its
+# playback side plays on the device the person chose (target.object), which
+# `channels output` and a person choosing a device move.
+#
+# Not EasyEffects' Stereo Tools: what EasyEffects' blocklist keeps out --
+# voice chat, games -- would play unadjusted, and a person who needs mono
+# needs it in a call most of all. Not the device's own channel volumes either:
+# every volume key sets both channels to one level, which is the balance
+# undone, and a device has no mono or swap.
+#
+# CHOOSING A DEVICE WHILE IT RUNS. A person choosing a device in a volume
+# popup or pavucontrol makes it default.configured.audio.sink, which would
+# take the sink out of the path with the adjustments still on. So the host
+# runs a watcher beside itself (channels_follow): a device chosen becomes the
+# one the sink plays on, and the sink the default again. The volume popup's
+# controls act on that device rather than on the sink, which
+# jayos-audio-state treats as EasyEffects' inert devices are
+# (rust/crates/jayos-core/src/pw_route.rs, CHANNELS_SINK).
+#
+# CHANNEL STATUS KEYS. installed (PipeWire's filter-chain module is there),
+# running and enabled (the unit), active (any adjustment on), mono and swap
+# (true or false), balance (-100, left only, to 100, right only), output (the
+# device it plays on), sink, isDefault (the sink is the default output), and
+# loaded (running, the sink there, and the default).
 
 set -uo pipefail
 
 UNIT=jayos-audio-denoise.service
 SOURCE=jayos_denoise_source
 CAPTURE=jayos_denoise_capture
+CH_UNIT=jayos-audio-channels.service
+CH_SINK=jayos_channels_sink
+CH_OUTPUT=jayos_channels_output
 SELF="$(realpath "${BASH_SOURCE[0]}")"
 HERE="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/jayos-audio"
 STATE_FILE="$STATE_DIR/denoise.state"
+CH_STATE_FILE="$STATE_DIR/channels.state"
 RUN_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/jayos-audio"
 # Where EasyEffects looks for LADSPA plugins when LADSPA_PATH is unset, in its
 # order; the package puts the plugin in the second. JAYOS_AUDIO_PLUGIN names a
@@ -128,19 +178,24 @@ strength_known() { [[ -n "$1" ]] && strength_params "$1"; }
 # ── state ────────────────────────────────────────────────────────────────────
 #
 # key=value lines: strength, and input, the node.name of the microphone the
-# filter records. Read as text, never sourced.
-state_get() { # state_get <key> [default]
+# filter records; and in channels.state mono, swap, balance and output, the
+# device the channel sink plays on. Read as text, never sourced.
+kv_get() { # kv_get <file> <key> [default]
     local v=""
-    [[ -f "$STATE_FILE" ]] && v=$(sed -n -E "s/^$1=(.*)$/\\1/p" "$STATE_FILE" | tail -n 1)
-    printf '%s' "${v:-${2:-}}"
+    [[ -f "$1" ]] && v=$(sed -n -E "s/^$2=(.*)$/\\1/p" "$1" | tail -n 1)
+    printf '%s' "${v:-${3:-}}"
 }
-state_set() { # state_set <key> <value>
+kv_set() { # kv_set <file> <key> <value>
     local tmp
     mkdir -p "$STATE_DIR" || return 1
-    tmp=$(mktemp "$STATE_DIR/.denoise.state.XXXXXX") || return 1
-    { [[ -f "$STATE_FILE" ]] && grep -vE "^$1=" "$STATE_FILE"; printf '%s=%s\n' "$1" "$2"; } > "$tmp" \
-        && mv -f -- "$tmp" "$STATE_FILE" || { rm -f -- "$tmp"; return 1; }
+    tmp=$(mktemp "$STATE_DIR/.${1##*/}.XXXXXX") || return 1
+    { [[ -f "$1" ]] && grep -vE "^$2=" "$1"; printf '%s=%s\n' "$2" "$3"; } > "$tmp" \
+        && mv -f -- "$tmp" "$1" || { rm -f -- "$tmp"; return 1; }
 }
+state_get() { kv_get "$STATE_FILE" "$@"; }
+state_set() { kv_set "$STATE_FILE" "$@"; }
+ch_get() { kv_get "$CH_STATE_FILE" "$@"; }
+ch_set() { kv_set "$CH_STATE_FILE" "$@"; }
 
 current_strength() {
     local s
@@ -163,11 +218,16 @@ plugin_path() {
 }
 
 # PipeWire's filter-chain module, without which the host cannot load a graph.
+# JAYOS_AUDIO_PW_MODULES names the one directory to look in, for a build tree
+# and for the suites, which could not otherwise ask about a machine without it
+# on one that has it.
 filter_chain_module() {
     local d
-    for d in "${JAYOS_AUDIO_PW_MODULES:-}" /usr/lib/pipewire-0.3 /usr/lib64/pipewire-0.3 \
-             /usr/lib/x86_64-linux-gnu/pipewire-0.3 /usr/lib/aarch64-linux-gnu/pipewire-0.3; do
-        [[ -n "$d" && -f "$d/libpipewire-module-filter-chain.so" ]] && return 0
+    local -a dirs=(/usr/lib/pipewire-0.3 /usr/lib64/pipewire-0.3
+                   /usr/lib/x86_64-linux-gnu/pipewire-0.3 /usr/lib/aarch64-linux-gnu/pipewire-0.3)
+    [[ -n "${JAYOS_AUDIO_PW_MODULES:-}" ]] && dirs=("$JAYOS_AUDIO_PW_MODULES")
+    for d in "${dirs[@]}"; do
+        [[ -f "$d/libpipewire-module-filter-chain.so" ]] && return 0
     done
     return 1
 }
@@ -301,17 +361,18 @@ choose_input() {
     hardware_source "$n" && printf '%s' "$n"
 }
 
-unit_active()  { systemctl --user is-active  --quiet "$UNIT" 2>/dev/null; }
-unit_enabled() { systemctl --user is-enabled --quiet "$UNIT" 2>/dev/null; }
+unit_active()  { systemctl --user is-active  --quiet "${1:-$UNIT}" 2>/dev/null; }
+unit_enabled() { systemctl --user is-enabled --quiet "${1:-$UNIT}" 2>/dev/null; }
 
-wait_for_source() { # wait_for_source <seconds>
+wait_for_node() { # wait_for_node <node.name> <seconds>
     local i
-    for (( i = 0; i < $1 * 10; i++ )); do
-        node_id "$SOURCE" >/dev/null && return 0
+    for (( i = 0; i < $2 * 10; i++ )); do
+        node_id "$1" >/dev/null && return 0
         sleep 0.1
     done
     return 1
 }
+wait_for_source() { wait_for_node "$SOURCE" "$1"; }
 
 # ── an EasyEffects preset 1.x left behind ────────────────────────────────────
 #
@@ -460,6 +521,316 @@ denoise_host() {
     conf="$RUN_DIR/denoise.conf"
     host_config "$(current_strength)" "$(state_get input)" "$so" > "$conf" || die "could not write $conf"
     exec pipewire -c "$conf"
+}
+
+# ── the channel sink ─────────────────────────────────────────────────────────
+#
+# The header's THE CHANNEL SINK says what it is for. Its state is
+# channels.state: mono and swap (on or off), balance (an integer from -100 to
+# 100), and output, the device it plays on.
+
+ch_mono()    { [[ "$(ch_get mono off)" == on ]] && echo on || echo off; }
+ch_swap()    { [[ "$(ch_get swap off)" == on ]] && echo on || echo off; }
+ch_balance() {
+    local b
+    b=$(ch_get balance 0)
+    balance_known "$b" && balance_int "$b" || printf '0'
+}
+# As a plain integer: no sign but a minus, no leading zero that bash would
+# read as octal.
+balance_int() { # balance_int <value balance_known accepts>
+    local v=${1#+}
+    if [[ "$v" == -* ]]; then printf '%d' "-$((10#${v#-}))"; else printf '%d' "$((10#$v))"; fi
+}
+# Whole numbers from -100 to 100, a sign allowed: what a slider of the person's
+# writes, and nothing a shell or awk would read as something else.
+balance_known() { [[ "$1" =~ ^[+-]?[0-9]{1,3}$ ]] && (( 10#${1#[+-]} <= 100 )); }
+ch_active() { [[ "$(ch_mono)" == on || "$(ch_swap)" == on || "$(ch_balance)" != 0 ]]; }
+
+# A device the sink may play on: not the sink, not EasyEffects' sink, which
+# plays back into whatever is the default -- the sink, a loop -- and not a
+# monitor.
+output_device() { # output_device <node.name>
+    [[ -n "$1" && "$1" != "$CH_SINK" && "$1" != easyeffects_sink && "$1" != *.monitor ]]
+}
+
+set_default_sink() { # set_default_sink <node.name>
+    command -v pw-metadata >/dev/null 2>&1 || return 1
+    pw-metadata -n default 0 default.configured.audio.sink "{ \"name\": \"$1\" }" Spa:String:JSON >/dev/null 2>&1
+}
+
+# The device to play on: the configured default where it is one -- the
+# device the person chose last, before the sink took the default -- then the
+# one played on last, then the default WirePlumber chose.
+choose_output() {
+    local n
+    n=$(default_name default.configured.audio.sink)
+    output_device "$n" && { printf '%s' "$n"; return; }
+    n=$(ch_get output)
+    output_device "$n" && { printf '%s' "$n"; return; }
+    n=$(default_name default.audio.sink)
+    output_device "$n" && printf '%s' "$n"
+}
+
+# The four mixer gains, "l:Gain 1" (left from left) "l:Gain 2" (left from
+# right) "r:Gain 1" (right from left) "r:Gain 2" (right from right), for mono,
+# swap and balance. Mono is each side the mean of both, so a voice panned to
+# one side reaches both at half its level and a centred one keeps its own;
+# swap is each side the other's, and does nothing to mono; balance turns the
+# far side down, linearly, to nothing at 100. LC_ALL=C, so a decimal comma in
+# the person's locale never reaches PipeWire's parser.
+channel_gains() { # channel_gains <mono> <swap> <balance>  -> "L1 L2 R1 R2"
+    LC_ALL=C awk -v m="$1" -v s="$2" -v b="$3" 'BEGIN {
+        gl = (b > 0) ? (100 - b) / 100 : 1
+        gr = (b < 0) ? (100 + b) / 100 : 1
+        if (m == "on")      { l1 = gl / 2; l2 = gl / 2; r1 = gr / 2; r2 = gr / 2 }
+        else if (s == "on") { l1 = 0; l2 = gl; r1 = gr; r2 = 0 }
+        else                { l1 = gl; l2 = 0; r1 = 0; r2 = gr }
+        printf "%.4f %.4f %.4f %.4f\n", l1, l2, r1, r2
+    }'
+}
+
+# The host: copies, because a filter-chain's graph inputs can feed one port
+# each and each input feeds two mixers (PipeWire's own
+# filter-chain/sink-make-LFE.conf does the same); then a mixer per output
+# channel. The capture side is the sink, inert to the volume popup; the
+# playback side plays on the device, passive so that a sink nothing plays
+# into does not keep the device awake.
+channels_config() { # channels_config <mono> <swap> <balance> <output or "">
+    local g target=""
+    g=$(channel_gains "$1" "$2" "$3")
+    read -r L1 L2 R1 R2 <<<"$g"
+    [[ -n "$4" ]] && target=$(printf '\n                target.object = "%s"' "$4")
+    cat <<CONF
+# Generated by jayos-audio $(version_text) for mono $1, swap $2, balance $3; written
+# again at every start of $CH_UNIT, so an edit here does not last.
+context.properties = {
+    log.level = 0
+}
+context.spa-libs = {
+    audio.convert.* = audioconvert/libspa-audioconvert
+    support.*       = support/libspa-support
+}
+context.modules = [
+    { name = libpipewire-module-rt
+        args = { rtportal.enabled = false }
+        flags = [ ifexists nofail ]
+    }
+    { name = libpipewire-module-protocol-native }
+    { name = libpipewire-module-client-node }
+    { name = libpipewire-module-adapter }
+    { name = libpipewire-module-filter-chain
+        args = {
+            node.description = "Sound adjustments"
+            media.name       = "Sound adjustments"
+            filter.graph = {
+                nodes = [
+                    { type = builtin name = inL label = copy }
+                    { type = builtin name = inR label = copy }
+                    { type = builtin name = l label = mixer control = { "Gain 1" = $L1 "Gain 2" = $L2 } }
+                    { type = builtin name = r label = mixer control = { "Gain 1" = $R1 "Gain 2" = $R2 } }
+                ]
+                links = [
+                    { output = "inL:Out" input = "l:In 1" }
+                    { output = "inL:Out" input = "r:In 1" }
+                    { output = "inR:Out" input = "l:In 2" }
+                    { output = "inR:Out" input = "r:In 2" }
+                ]
+                inputs  = [ "inL:In" "inR:In" ]
+                outputs = [ "l:Out" "r:Out" ]
+            }
+            audio.position = [ FL FR ]
+            capture.props = {
+                node.name   = "$CH_SINK"
+                media.class = Audio/Sink
+                device.description = "Sound adjustments"
+            }
+            playback.props = {
+                node.name    = "$CH_OUTPUT"
+                node.passive = true$target
+            }
+        }
+    }
+]
+CONF
+}
+
+# The running sink's gains set to the state's, through its control params.
+# 1 where there is no sink to set, or PipeWire refuses.
+live_gains() {
+    local id g
+    g=$(channel_gains "$(ch_mono)" "$(ch_swap)" "$(ch_balance)")
+    read -r L1 L2 R1 R2 <<<"$g"
+    command -v pw-cli >/dev/null 2>&1 && id=$(node_id "$CH_SINK") \
+        && pw-cli set-param "$id" Props \
+            "{ params = [ \"l:Gain 1\" $L1 \"l:Gain 2\" $L2 \"r:Gain 1\" $R1 \"r:Gain 2\" $R2 ] }" >/dev/null 2>&1
+}
+
+# The playback side moved onto a device, through its target.object as
+# pavucontrol moves a stream, and recorded for the next start.
+move_output() { # move_output <node.name>
+    local id
+    ch_set output "$1" || return 1
+    id=$(node_id "$CH_OUTPUT") || return 0
+    pw-metadata "$id" target.object "$1" >/dev/null 2>&1
+}
+
+# Beside the host, in its unit, until PipeWire goes: the default metadata as
+# it changes. A device a person chooses is moved onto and the sink made the
+# default again; and a move of the playback side by anything else is undone,
+# since EasyEffects moving it into its own sink, which plays into the default
+# -- this sink -- is a loop that howls. Its own writes come back to it, and
+# are each a no-op: the sink chosen is not a device, and the playback side
+# moved where the state says is where it is.
+#
+# It starts reading once the playback side is there: a metadata client sees a
+# change on a node only where the node existed when it connected (RUN on
+# PipeWire 1.0.5: a `pw-metadata -m` started before the host printed none of
+# the playback side's target.object changes, and one started after printed
+# each), so a watcher started with the host would follow the person's choice
+# and never see a move of its own playback side.
+channels_follow() {
+    command -v pw-metadata >/dev/null 2>&1 || return 0
+    local line id key value name own re
+    wait_for_node "$CH_OUTPUT" 10
+    re="^update: id:([0-9]+) key:'([^']*)' value:'(.*)' type:"
+    while IFS= read -r line; do
+        [[ "$line" =~ $re ]] || continue
+        id=${BASH_REMATCH[1]} key=${BASH_REMATCH[2]} value=${BASH_REMATCH[3]}
+        case "$key" in
+            default.configured.audio.sink)
+                [[ "$id" == 0 ]] || continue
+                name=$(jq -r '.name // empty' <<<"$value" 2>/dev/null)
+                output_device "$name" || continue
+                move_output "$name"
+                set_default_sink "$CH_SINK" ;;
+            target.object)
+                own=$(node_id "$CH_OUTPUT") || continue
+                [[ "$id" == "$own" ]] || continue
+                name=$(ch_get output)
+                [[ -n "$name" && "$value" != "$name" ]] || continue
+                pw-metadata "$own" target.object "$name" >/dev/null 2>&1 ;;
+        esac
+    done < <(pw-metadata -n default -m 2>/dev/null)
+}
+
+channels_status() {
+    local installed=false running=false enabled=false active=false isdef=false loaded=false present=false
+    filter_chain_module && installed=true
+    unit_active "$CH_UNIT" && running=true
+    unit_enabled "$CH_UNIT" && enabled=true
+    ch_active && active=true
+    if [[ $running == true ]] && node_id "$CH_SINK" >/dev/null; then present=true; fi
+    [[ "$(default_name default.audio.sink)" == "$CH_SINK" ]] && isdef=true
+    [[ $present == true && $isdef == true ]] && loaded=true
+    jq -nc --argjson installed "$installed" --argjson running "$running" --argjson enabled "$enabled" \
+        --argjson active "$active" --argjson mono "$([[ $(ch_mono) == on ]] && echo true || echo false)" \
+        --argjson swap "$([[ $(ch_swap) == on ]] && echo true || echo false)" \
+        --argjson balance "$(ch_balance)" --arg output "$(ch_get output)" --arg sink "$CH_SINK" \
+        --argjson isDefault "$isdef" --argjson loaded "$loaded" \
+        '{installed: $installed, running: $running, enabled: $enabled, active: $active,
+          mono: $mono, swap: $swap, balance: $balance, output: $output, sink: $sink,
+          isDefault: $isDefault, loaded: $loaded}'
+}
+
+# What the three are now, as one line `set` and `off` end with.
+channels_said() { printf 'mono %s, swap %s, balance %s' "$(ch_mono)" "$(ch_swap)" "$(ch_balance)"; }
+
+# Stopped first, so that its watcher cannot answer the default given back by
+# making the sink the default again; then the device played on is the
+# default, where the sink was.
+channels_off() {
+    local output
+    output=$(ch_get output)
+    systemctl --user disable --now "$CH_UNIT" >/dev/null 2>&1 || {
+        unit_active "$CH_UNIT" && die "systemctl could not stop $CH_UNIT"
+    }
+    if [[ "$(default_name default.configured.audio.sink)" == "$CH_SINK" ]]; then
+        if output_device "$output"; then
+            set_default_sink "$output" || echo "jayos-audio: could not make $output the default output again" >&2
+        else
+            pw-metadata -n default 0 -d default.configured.audio.sink >/dev/null 2>&1 || true
+        fi
+    fi
+    echo "sound adjustments off ($(channels_said))${output:+, playing on $output}"
+}
+
+channels_set() { # channels_set <key=value>...
+    local arg key value output was
+    (( $# > 0 )) || die "usage: jayos-audio channels set [mono=on|off] [swap=on|off] [balance=<-100..100>]"
+    # Every word checked before any is written: a refused one changes nothing.
+    for arg in "$@"; do
+        key=${arg%%=*} value=${arg#*=}
+        [[ "$arg" == *=* ]] || die "'$arg' is not key=value: mono=on|off, swap=on|off, balance=<-100..100>"
+        case "$key" in
+            mono|swap) [[ "$value" == on || "$value" == off ]] || die "$key is on or off, not '$value'" ;;
+            balance)   balance_known "$value" || die "balance is a whole number from -100 to 100, not '$value'" ;;
+            *)         die "no adjustment is called '$key': mono, swap, balance" ;;
+        esac
+    done
+    for arg in "$@"; do
+        key=${arg%%=*} value=${arg#*=}
+        [[ "$key" == balance ]] && value=$(balance_int "$value")
+        ch_set "$key" "$value" || die "could not write $CH_STATE_FILE"
+    done
+    if ! ch_active; then
+        channels_off
+        return
+    fi
+    filter_chain_module || die "PipeWire's filter-chain module is not installed"
+    was=$(ch_get output)
+    output=$(choose_output)
+    [[ -n "$output" ]] || die "there is no output device to play the adjusted sound on"
+    ch_set output "$output" || die "could not write $CH_STATE_FILE"
+    # A running sink on the same device takes the gains live; a restart is a
+    # moment of silence in whatever plays.
+    if unit_active "$CH_UNIT" && [[ "$output" == "$was" ]] && node_id "$CH_SINK" >/dev/null && live_gains; then
+        systemctl --user enable "$CH_UNIT" >/dev/null 2>&1
+    elif unit_active "$CH_UNIT"; then
+        systemctl --user restart "$CH_UNIT" 2>/dev/null || die "systemctl could not restart $CH_UNIT"
+        systemctl --user enable "$CH_UNIT" >/dev/null 2>&1
+    else
+        systemctl --user enable --now "$CH_UNIT" >/dev/null 2>&1 || die "systemctl could not start $CH_UNIT"
+    fi
+    wait_for_node "$CH_SINK" "$WAIT_ON" \
+        || die "$CH_UNIT started, but $CH_SINK did not appear within $WAIT_ON seconds: journalctl --user -u $CH_UNIT"
+    set_default_sink "$CH_SINK" || die "$CH_SINK is up, but could not be made the default output"
+    echo "sound adjustments on ($(channels_said)), playing on $output"
+}
+
+channels_output() { # channels_output [node.name]
+    if [[ -z "${1:-}" ]]; then ch_get output; echo; return 0; fi
+    output_device "$1" || die "$1 is not a device the adjusted sound can play on"
+    if unit_active "$CH_UNIT"; then
+        move_output "$1" || die "could not move the adjusted sound onto $1"
+    else
+        ch_set output "$1" || die "could not write $CH_STATE_FILE"
+    fi
+    echo "playing on $1"
+}
+
+channels_host() {
+    local conf
+    filter_chain_module || die "PipeWire's filter-chain module is not installed"
+    mkdir -p "$RUN_DIR" || die "could not make $RUN_DIR"
+    conf="$RUN_DIR/channels.conf"
+    channels_config "$(ch_mono)" "$(ch_swap)" "$(ch_balance)" "$(ch_get output)" > "$conf" \
+        || die "could not write $conf"
+    # In the unit's own control group, so that stopping the unit stops it too.
+    channels_follow &
+    exec pipewire -c "$conf"
+}
+
+channels() {
+    local verb=${1:-status}; shift || true
+    case "$verb" in
+        status) channels_status ;;
+        set)    channels_set "$@" ;;
+        output) channels_output "${1:-}" ;;
+        config) channels_config "$(ch_mono)" "$(ch_swap)" "$(ch_balance)" "$(ch_get output)" ;;
+        host)   channels_host ;;
+        *)      die "usage: jayos-audio channels status|set|output|config|host" ;;
+    esac
 }
 
 # ── the recording floor ──────────────────────────────────────────────────────
@@ -621,6 +992,7 @@ denoise() {
 
 case "${1:-}" in
     denoise)  shift; denoise "$@" ;;
+    channels) shift; channels "$@" ;;
     floor)    case "${2:-}" in
                   status) floor_report 0 ;;
                   apply)  floor_report 1 ;;
@@ -635,5 +1007,5 @@ case "${1:-}" in
               [[ -f "$HERE/easyeffects.sh" ]] || die "easyeffects.sh is not beside $SELF"
               exec bash "$HERE/easyeffects.sh" "$@" ;;
     version)  version_text ;;
-    *)        echo "usage: jayos-audio denoise ...|floor status|apply|realtime|easyeffects <verb>|version" >&2; exit 1 ;;
+    *)        echo "usage: jayos-audio denoise ...|channels ...|floor status|apply|realtime|easyeffects <verb>|version" >&2; exit 1 ;;
 esac
