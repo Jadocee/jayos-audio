@@ -72,9 +72,14 @@ fi
 # Every function the recipe defines is one this suite runs below, or one of
 # the two helpers they share. A pkgver() or a split package_*() added later
 # would otherwise be a function makepkg calls and nothing here has ever run.
+#
+# Sorted in the C locale, which the list below is written in. A UTF-8
+# locale's collation passes over the underscore, so `_steps` sorted as
+# `steps`, after `prepare`, and on the owner's machine (en_AU.UTF-8, on
+# 2026-11-16) this case failed and tools/release.sh refused v2.0.0.
 fns=$(env -i PATH="$PATH" bash --norc --noprofile -c \
           'startdir=$1; source "$2"; declare -F | sed "s/^declare -f //"' _ "$ROOT/packaging/arch" "$RECIPE" \
-      | sort | tr '\n' ' ')
+      | LC_ALL=C sort | tr '\n' ' ')
 if [[ "$fns" == "_steps _tree build check package prepare " ]]; then
     pass "its functions are prepare, build, check and package, and the two helpers they share"
 else
