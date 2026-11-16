@@ -13,17 +13,17 @@ leaves out `now_unix`, which neither program calls. Its header says so.
 | | |
 |---|---|
 | Repository | `https://github.com/Jadocee/jayos` |
-| Commit | `0871e22e5bb5576887e9be9fe793dfc36c8401e8` (2026-11-15) |
+| Commit | `7de4e12cbe68dca5517094dd5d9cbf15077abe00` (2026-11-15) |
 | Branch it was taken from | `ccr-3147b012-y550t7` |
 | Path there | `rust/crates/jayos-core/` |
 
 | File | sha256 |
 |---|---|
 | `Cargo.toml` | `670d93e5d5130428d7c0f76ffd18acaeceda1d3119c99b8d3e6dc3a97e2f4f26` |
-| `src/cli.rs` | `84b12553ff30105bb301d1862bc8cb9901d121dfa7df2c4e278783621b8373d4` |
+| `src/cli.rs` | `3842ab6326250ea2dcb2208a9a637eff83472a75a424860286af3157769bad5e` |
 | `src/emit.rs` | `e8b751ce39bb5f7af9119f8c9cef849764a3fb45f5c2a6c6268bdadf8ddcde76` |
-| `src/paths.rs` | `505ce599d886933a96dbd03f971cd4a26d157dd99443e16d257c6307e3ab17d6` |
-| `src/proc.rs` | `7b2c10a951111cfdd05683c072f00c05ce0a0b7c31a3b77e7bbc7233bd4601cc` |
+| `src/paths.rs` | `bb0de1e5c14fcf5630bf629868c3b317b4924e732a4fcea58b82f3265277794b` |
+| `src/proc.rs` | `55ddcecd7f2dfca90e2ea674112f38d83ee5f84b60a39613979a58fdae883580` |
 | `src/pw_route.rs` | `b7d4610ba4318e6e14072badf66f6caa774fe8d6672c7110264d6c13e96fbeb3` |
 
 `Cargo.toml` takes its version, edition, rust-version and licence from the

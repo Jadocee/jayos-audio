@@ -81,11 +81,7 @@
 //!                       CalendarPopup.qml runs it with no flags at all.
 //!   jayos-theme-palette    --print prints the palette instead of WRITING it, and
 //!                       Theme.qml watches that file. Two shell callers only.
-//!   jayos-keymapp-layers   --stdin reads the envelope on stdin instead of opening
-//!                       Keymapp's database. moonlander.sh and
-//!                       jayos-moonlander-osd run it bare, and the held-Super
-//!                       panel's Process runs `layout`, a verb, with no flag.
-//!   jayos-osk-controller   --probe and --devices are the diagnostics docs/OSK.md and
+//!   jayos-osk-controller   --probe and --devices are the diagnostics docs/features/OSK.md and
 //!                       doctor tell people to run; ControllerService.qml
 //!                       starts it bare, as a daemon.
 //!   jayos-wallpaper-search ddg_search.sh is the only caller, and its unknown-verb
@@ -117,13 +113,15 @@
 //! has a flag to mistype, and declaring an empty set for each would add thirty
 //! call sites whose only content is a promise to keep a list empty.
 //!
-//! The two helpers that read a flag and deliberately ignore an unknown one:
-//! `jayos-lock-osd` and `jayos-moonlander-osd`. `--probe` turns each daemon into a
-//! diagnostic, so a mistyped `--prob` starts the daemon that lock-osd.sh or
-//! moonlander-osd.sh wanted anyway -- and refusing would answer a typo in a
-//! login script by leaving the Caps Lock OSD, or the Moonlander's, switched
-//! off for the session. Each says so at its `has("probe")` call; they are
+//! The helper that reads a flag and deliberately ignores an unknown one:
+//! `jayos-lock-osd`. `--probe` turns the daemon into a diagnostic, so a
+//! mistyped `--prob` starts the daemon that lock-osd.sh wanted anyway -- and
+//! refusing would answer a typo in a login script by leaving the Caps Lock OSD
+//! switched off for the session. It says so at its `has("probe")` call, and is
 //! named here so this table is the whole list rather than most of it.
+//! jayos-moonlander-osd made the same choice for the same reason, and
+//! jayos-keymapp-layers stood in the first list above; both are the
+//! jayos-moonlander package's since 2026-11-12, and carry a copy of this file.
 //!
 //! And the five that hand-roll a parser because `Args` cannot express what
 //! their callers send -- `jayos-controllers`, `jayos-steam-downloads`,
