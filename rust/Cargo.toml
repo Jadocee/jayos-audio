@@ -24,7 +24,7 @@ members = [
 [workspace.package]
 # The package's version (VERSION at the repository's root); test-steps.sh
 # holds the two equal.
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
