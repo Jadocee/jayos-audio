@@ -464,7 +464,7 @@ fn spawn_reaped(command: &mut Command) -> io::Result<u32> {
 /// This is `command -v`, and it is here because guarding on it is a decision
 /// the project has already made deliberately: a tool is guarded when a
 /// fallback exists, and left unguarded when its absence should be loud. See
-/// docs/DEPENDENCIES.md. Use it for the first case only.
+/// docs/reference/DEPENDENCIES.md. Use it for the first case only.
 pub fn which(program: &str) -> Option<PathBuf> {
     if program.contains('/') {
         let p = PathBuf::from(program);
