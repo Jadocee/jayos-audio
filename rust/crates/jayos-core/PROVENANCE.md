@@ -27,7 +27,7 @@ leaves out `now_unix`, which neither program calls. Its header says so.
 | `src/pw_route.rs` | `b7d4610ba4318e6e14072badf66f6caa774fe8d6672c7110264d6c13e96fbeb3` |
 
 `Cargo.toml` takes its version, edition, rust-version and licence from the
-workspace, so the same bytes say 2.0.0 here, the package's version, and 1.0.0
+workspace, so the same bytes say 2.0.1 here, the package's version, and 1.0.0
 in JayOS.
 
 ## Why a copy, and not a dependency on JayOS
