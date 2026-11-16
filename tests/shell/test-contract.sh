@@ -574,7 +574,16 @@ fi
 says "the summary names each case under its suite" \
     "  tests/shell/test-skips.sh: the x case not exercised: no y"
 says "the second as well" "  tests/shell/test-skips.sh: the z case not exercised: no w"
-says "and the last line counts the cases" "ok, nothing to fix; 2 case(s) not exercised, listed above"
+# The count is of cases, the machine's as well as the stub's: the copy's
+# rust/ step is real, and where no mold is installed it adds a counted case of
+# its own ("linking rust/ with mold not exercised"). This said 2 outright, and
+# the release workflow's first run, for v2.0.0 on a runner with no mold, failed
+# here on 3. So the two this case adds are counted on top of whatever else the
+# summary names.
+others=$(sed -n '/^ran, but not every case:$/,$p' <<<"$OUT" | grep -E '^  ' \
+         | grep -vc '^  tests/shell/test-skips\.sh: ')
+says "and the last line counts the cases" \
+    "ok, nothing to fix; $((2 + others)) case(s) not exercised, listed above"
 
 D=$(stubbed 0 1)
 checksh "$D"
