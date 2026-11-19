@@ -518,15 +518,53 @@ call speech. That is consistent with the cliff falling where it does. It is
 not a measurement of the model's insides.
 
 What brings speech back is level **before** the plugin. The same recording 5
-to 10 dB louder kept what the table's upper rows keep. On a machine that
-means one of these:
-- the microphone's own input gain, its PipeWire source volume, which is not
-  "Microphone (noise suppressed)";
-- or, where the hardware cannot give more, a gain stage ahead of the plugin
-  in the filter chain. That is not in this package.
+to 10 dB louder kept what the table's upper rows keep. Turning up
+"Microphone (noise suppressed)" after the plugin makes what survived louder
+and brings back nothing it cut.
 
-Turning up "Microphone (noise suppressed)" after the plugin makes what
-survived louder and brings back nothing it cut.
+### The gain either side of the plugin
+
+Since 2026-11-19 the host's filter chain multiplies the microphone by 12 dB
+before the plugin and by as much less after it. These are two `linear`
+nodes of PipeWire's builtin set around `df`, named `pre` and `post`
+(`host_config` in `src/jayos-audio`, `PRE_GAIN_DB`). What applications record
+is as loud as the microphone is; only the plugin hears it louder. The
+multiplication is in floats inside the filter chain, so nothing clips between
+the nodes.
+
+Measured the same way as above, with the input multiplied before the plugin
+and its output divided after, at 6 dB SNR (speech kept, and the share of
+speech frames cut by more than 20 dB):
+
+| speech / noise (dBFS) | balanced, no gain | balanced, +12 dB | maximum, no gain | maximum, +12 dB |
+|---|---|---|---|---|
+| -54 / -60 | -3.2 dB, 5 % | -2.4 dB, 5 % | -0.7 dB, 5 % | -1.0 dB, 7 % |
+| -59 / -65 | -15.7 dB, 95 % | -3.0 dB, 4 % | -11.5 dB, 95 % | -0.8 dB, 6 % |
+| -64 / -70 | -14.4 dB, 94 % | -2.8 dB, 5 % | -13.1 dB, 95 % | -0.6 dB, 5 % |
+| -69 / -75 | -11.7 dB, 80 % | -13.5 dB, 93 % | -11.9 dB, 81 % | -9.4 dB, 92 % |
+| -10 / -16 | -1.9 dB, 3 % | -2.1 dB, 3 % | -0.8 dB, 4 % | -1.0 dB, 3 % |
+| -3 / -40 | -0.0 dB, 0 % | -1.5 dB, 0 % | -0.2 dB, 0 % | -0.6 dB, 0 % |
+
+Gentle moved the same way: 69 % of the frames cut at -59 dBFS with no gain,
+and 1 % with 12 dB.
+
+Why 12 and not more: **the plugin is not blind to level at the top
+either.** With 20 dB, speech at -3 dBFS lost 6.1 dB on balanced; with 30 dB
+it lost 19.5 dB, and speech at -10 dBFS lost 13.4. With 12 dB the cliff
+moves about 10 dB lower, to between -64 and -69 dBFS, and the loudest speech
+measured gives up at most 1.5 dB. Every run in the table ran without a
+dropped sample; Gentle's two at -59 dBFS each dropped one run of 32 samples
+or more. A gain that followed the microphone's level, rather than a
+fixed one, could move the cliff further without that cost. It would have to
+live in the plugin, which alone knows its own delay, and it is not written.
+
+`tests/shell/test-engine.sh` holds the configuration to the 12 dB, the two
+multipliers to inverses within a millionth, and the order pre, `df`, post.
+`tests/shell/test-host.sh` loads it in a real PipeWire and reads both gains
+off the running filter. On PipeWire 1.6.11 in the sandbox, white noise still
+came out 48.1 dB quieter. That PipeWire's builtin `linear` multiplies as its
+name says is read from its source, `builtin_plugin.c`; the measurement above
+multiplied the samples itself.
 
 ### Latency
 
