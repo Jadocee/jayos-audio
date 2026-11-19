@@ -432,8 +432,101 @@ descriptors:
   it is above 0. 0.02 is EasyEffects' default, 0.05 the ceiling.
 
 These are informed defaults, not measured ones: nothing in this repository
-can listen. They are meant to be told apart in a recording, and the popup's
-strength button cycles through them so that recording is one click per row.
+can listen. They are meant to be told apart in a recording, and JayOS's
+volume popup has a stepped slider with a stop at each, so that recording is
+one move per row. *[It was a button that cycled through them until
+2026-11-19.]*
+
+### Quiet speech, measured
+
+Measured on 2026-11-19, after a report that maximum asked for louder speech,
+closer to the microphone. What it found: **how much speech survives depends
+on how loud it reaches the plugin, and much less on the strength.** Every
+strength keeps speech down to about -54 dBFS. Five dB below that, every
+strength cuts most of it.
+
+How. 2.0.1's `libdeep_filter_ladspa.so` ran in an Arch container under a
+small LADSPA host. The host handed it one 1024-frame quantum per real-time
+period, as PipeWire's data thread does, with each strength's six controls
+from the table above. The input was the fork's `assets/clean_freesound_33711.wav`
+(speech) over its `assets/noise_freesound_2530.wav`, each scaled to an RMS
+level. Speech was scaled by its active level: the RMS of the 20 ms frames
+within 30 dB of the loudest. Two seconds of noise alone came first.
+
+What was compared:
+- the output, aligned to the clean speech by cross-correlation (80.7 ms in
+  every run);
+- the speech energy kept over the frames that hold speech;
+- the share of those frames cut by more than 20 dB, which is what a lost
+  syllable looks like;
+- the noise removed over the lead.
+
+No run dropped a sample. The host, the inputs and the analysis were not
+committed. This is run evidence about the plugin; a person listening was not
+part of it.
+
+At a fixed 6 dB SNR, by level (speech energy kept, and the share of speech
+frames cut by more than 20 dB):
+
+| speech / noise (dBFS) | gentle | balanced | maximum |
+|---|---|---|---|
+| -10 / -16 | -1.8 dB, 1 % | -1.9 dB, 3 % | -0.8 dB, 4 % |
+| -44 / -50 | -2.7 dB, 2 % | -2.9 dB, 5 % | -0.8 dB, 6 % |
+| -49 / -55 | -2.5 dB, 1 % | -2.6 dB, 4 % | -0.6 dB, 5 % |
+| -54 / -60 | -3.0 dB, 1 % | -3.2 dB, 5 % | -0.7 dB, 5 % |
+| -59 / -65 | -14.7 dB, 74 % | -15.7 dB, 95 % | -11.5 dB, 95 % |
+
+With a quiet room's floor held at -50 dBFS:
+- Speech from -20 to -47 dBFS lost at most 3.5 dB and 7 % of its frames on
+  any of the three. That held dry, and with a room's reverberation added
+  (RT60 0.5 s, as much reverberant as direct sound) at -30 and -40.
+- Speech at -50 (0 dB SNR) lost 12 to 14 dB on all three: 30 % of frames on
+  gentle, 53 % on balanced and 56 % on maximum.
+
+Noise alone was 24, 50 and 56 dB down on gentle, balanced and maximum.
+
+What that says about maximum:
+- **It is not the strength that cuts quiet speech.** At the same level it
+  keeps more speech than balanced, not less. Its thresholds, 35/35, are why:
+  maximum with balanced's 30/20 kept what balanced kept. Its limit of 100
+  rather than 70 changed neither what was kept nor what was cut; its beta of
+  0.05 rather than 0.02 took 5 dB more of the noise and changed what was
+  kept by under half a dB.
+- **The cliff is shared**, and gentle gives the most back over it, because a
+  syllable the model rejects is mixed back at the limit. Gentle returns it
+  24 dB down, faint but there. Balanced returns it 70 dB down, and maximum
+  does not return it at all; either way it is gone.
+- So a microphone that brings speech in near -55 dBFS loses words on
+  balanced as on maximum. That maximum was the strength the report named may
+  be because it was the one in use; this measurement cannot tell.
+
+Why level matters at all (read and computed, not run). The model reads the
+following:
+- **ERB band powers**, as `10·log10(power + 1e-10)` with a running mean taken
+  away (`feat_erb` and `band_mean_norm_erb` in `libDF/src/lib.rs` at the
+  pinned commit).
+- **The spectrum**, scaled by `wnorm`, 1/960 at 48 kHz with a 960-sample
+  window, before either.
+
+The mean normalisation takes a steady level away, but not the `1e-10`. That
+floor is fixed, and it sits about where a band of white noise at -65 dBFS
+lands: the bin power is about RMS²/1920, which is 1.6e-10 there. Speech's
+upper bands, the consonants that tell words apart, are well under its
+overall level. So at an active level near -59 dBFS they reach that floor,
+their contrast flattens into it, and the model has nothing it learned to
+call speech. That is consistent with the cliff falling where it does. It is
+not a measurement of the model's insides.
+
+What brings speech back is level **before** the plugin. The same recording 5
+to 10 dB louder kept what the table's upper rows keep. On a machine that
+means one of these:
+- the microphone's own input gain, its PipeWire source volume, which is not
+  "Microphone (noise suppressed)";
+- or, where the hardware cannot give more, a gain stage ahead of the plugin
+  in the filter chain. That is not in this package.
+
+Turning up "Microphone (noise suppressed)" after the plugin makes what
+survived louder and brings back nothing it cut.
 
 ### Latency
 
@@ -710,7 +803,7 @@ jayos-denoise status | jq .                        # loaded: true
 pw-top
 
 # 4. Listen. One recording per strength, a keyboard clattering throughout;
-#    the popup's strength button cycles gentle -> balanced -> maximum.
+#    the popup's strength slider stops at gentle, balanced and maximum.
 #    By node NAME: --target takes a name or an object.serial, not the number
 #    `wpctl status` prints, and a target that matches nothing -- that number,
 #    or this name while EasyEffects is not running -- is no error: pw-record
@@ -767,9 +860,11 @@ stderr, not to `journalctl --user -u easyeffects.service`.]*
   source, and why". `packaging/arch/PKGBUILD` says the same about the peeled
   tag where it pins.]*
 
-* **Nothing here was A/B tested.** The strength table is what "RTX Voice
-  quality" is approached with, not proof of it; the on-machine listening test
-  is yours. CPU cost was not measured either.
+* **Nothing here was A/B tested by ear.** The strength table is what "RTX
+  Voice quality" is approached with, not proof of it; the on-machine
+  listening test is yours. What each strength keeps of speech at each level
+  was measured against the plugin (*Quiet speech, measured*), which says
+  what is cut, not how it sounds. CPU cost was not measured.
 * **The socket's replies are read, not seen.** The bytes the scripts rely on
   — a bare `1` or `2` for the bypass, the name and one newline for a preset —
   are read from upstream's `src/local_server.cpp`, and were run against a
