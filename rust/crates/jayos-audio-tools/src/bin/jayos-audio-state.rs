@@ -768,6 +768,11 @@ fn master_rows(
              the device's it plays on, and that device could not be found",
             default.name
         )),
+        None if default.name == pw_route::DENOISE_SOURCE => Err(format!(
+            "the default {noun}, {}, is jayos-audio's noise suppression, whose level that \
+             counts is the microphone's it records, and that microphone could not be found",
+            default.name
+        )),
         None => Err(format!(
             "the default {noun}, {}, is one of EasyEffects' virtual devices, whose own level \
              and mute reach nothing, and the device behind it could not be found",
@@ -776,25 +781,40 @@ fn master_rows(
     }
 }
 
+/// The records [`behind`] falls back on, each read at most once per poll
+/// however many sides need it: EasyEffects' rc, and jayos-audio's
+/// channels.state and denoise.state.
+#[derive(Default)]
+struct Records {
+    rc: Option<String>,
+    channels: Option<String>,
+    denoise: Option<String>,
+}
+
+impl Records {
+    fn read() -> Self {
+        Records {
+            rc: std::fs::read_to_string(pw_route::easyeffects_rc()).ok(),
+            channels: std::fs::read_to_string(pw_route::channels_state()).ok(),
+            denoise: std::fs::read_to_string(pw_route::denoise_state()).ok(),
+        }
+    }
+}
+
 /// The device behind an inert default: the link graph first, then the record
 /// of whoever made the device. EasyEffects' rc, which is all there is while its
-/// inactivity timer has unlinked the filters; and for jayos-audio's channel
-/// sink its own channels.state, which is all there is while its host restarts
-/// onto another device. `dump`, `rc` and `channels` are what pw-dump printed
-/// and what the two files hold, each asked for at most once per poll however
-/// many sides need them.
-fn behind(
-    name: &str,
-    side: Side,
-    dump: &Value,
-    rc: Option<&str>,
-    channels: Option<&str>,
-) -> Option<String> {
+/// inactivity timer has unlinked the filters; for jayos-audio's channel sink
+/// its own channels.state, and for its noise suppression its denoise.state,
+/// which are all there is while a host restarts onto another device. `dump` is
+/// what pw-dump printed.
+fn behind(name: &str, side: Side, dump: &Value, records: &Records) -> Option<String> {
     pw_route::device_behind(dump, name, side).or_else(|| {
         if name == pw_route::CHANNELS_SINK {
-            channels.and_then(pw_route::channels_output)
+            records.channels.as_deref().and_then(pw_route::channels_output)
+        } else if name == pw_route::DENOISE_SOURCE {
+            records.denoise.as_deref().and_then(pw_route::denoise_input)
         } else {
-            rc.and_then(|text| pw_route::easyeffects_device(text, side))
+            records.rc.as_deref().and_then(|text| pw_route::easyeffects_device(text, side))
         }
     })
 }
@@ -1429,9 +1449,7 @@ fn master(side: Side) -> ExitCode {
     };
     let answer = master_rows(rows, side, |name| {
         let dump = parse_dump(run("pw-dump", &[], budget.left()));
-        let rc = std::fs::read_to_string(pw_route::easyeffects_rc()).ok();
-        let channels = std::fs::read_to_string(pw_route::channels_state()).ok();
-        behind(name, side, &dump, rc.as_deref(), channels.as_deref())
+        behind(name, side, &dump, &Records::read())
     });
     match answer {
         Ok((default_row, target)) => emit::json(&Master {
@@ -1532,19 +1550,14 @@ fn main() -> ExitCode {
     let source_name = inert_default(&state.inputs).map(|row| row.name.clone());
     if sink_name.is_some() || source_name.is_some() {
         let dump = parse_dump(run("pw-dump", &[], budget.left()));
-        let rc = std::fs::read_to_string(pw_route::easyeffects_rc()).ok();
-        let channels = std::fs::read_to_string(pw_route::channels_state()).ok();
+        let records = Records::read();
         if let Some(name) = sink_name {
-            if let Some(device) =
-                behind(&name, Side::Sink, &dump, rc.as_deref(), channels.as_deref())
-            {
+            if let Some(device) = behind(&name, Side::Sink, &dump, &records) {
                 route_through(&mut state.outputs, &device);
             }
         }
         if let Some(name) = source_name {
-            if let Some(device) =
-                behind(&name, Side::Source, &dump, rc.as_deref(), channels.as_deref())
-            {
+            if let Some(device) = behind(&name, Side::Source, &dump, &records) {
                 route_through(&mut state.inputs, &device);
             }
         }
@@ -2879,6 +2892,15 @@ id 52, type PipeWire:Interface:Node
         );
     }
 
+    /// The records [`behind`] falls back on, as the files would hold them.
+    fn records(rc: Option<&str>, channels: Option<&str>, denoise: Option<&str>) -> Records {
+        Records {
+            rc: rc.map(str::to_string),
+            channels: channels.map(str::to_string),
+            denoise: denoise.map(str::to_string),
+        }
+    }
+
     #[test]
     fn the_link_graph_wins_and_the_rc_stands_in_when_it_is_unlinked() {
         let dump = json!([
@@ -2895,14 +2917,19 @@ id 52, type PipeWire:Interface:Node
         ]);
         let rc = "[StreamOutputs]\noutputDevice=alsa_output.headphones\n";
         assert_eq!(
-            behind("easyeffects_sink", Side::Sink, &dump, Some(rc), None).as_deref(),
+            behind("easyeffects_sink", Side::Sink, &dump, &records(Some(rc), None, None))
+                .as_deref(),
             Some("alsa_output.speakers")
         );
         assert_eq!(
-            behind("easyeffects_sink", Side::Sink, &json!([]), Some(rc), None).as_deref(),
+            behind("easyeffects_sink", Side::Sink, &json!([]), &records(Some(rc), None, None))
+                .as_deref(),
             Some("alsa_output.headphones")
         );
-        assert_eq!(behind("easyeffects_sink", Side::Sink, &json!([]), None, None), None);
+        assert_eq!(
+            behind("easyeffects_sink", Side::Sink, &json!([]), &records(None, None, None)),
+            None
+        );
     }
 
     #[test]
@@ -2927,13 +2954,98 @@ id 52, type PipeWire:Interface:Node
         let rc = "[StreamOutputs]\noutputDevice=jayos_channels_sink\n";
         let record = "mono=on\nswap=off\nbalance=0\noutput=alsa_output.headphones\n";
         assert_eq!(
-            behind("jayos_channels_sink", Side::Sink, &json!([]), Some(rc), Some(record))
-                .as_deref(),
+            behind(
+                "jayos_channels_sink",
+                Side::Sink,
+                &json!([]),
+                &records(Some(rc), Some(record), None)
+            )
+            .as_deref(),
             Some("alsa_output.headphones")
         );
-        assert_eq!(behind("jayos_channels_sink", Side::Sink, &json!([]), Some(rc), None), None);
+        assert_eq!(
+            behind("jayos_channels_sink", Side::Sink, &json!([]), &records(Some(rc), None, None)),
+            None
+        );
         // And EasyEffects' own device never reads the channel record.
-        assert_eq!(behind("easyeffects_sink", Side::Sink, &json!([]), None, Some(record)), None);
+        assert_eq!(
+            behind("easyeffects_sink", Side::Sink, &json!([]), &records(None, Some(record), None)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_denoise_source_falls_back_to_its_own_record_never_easyeffects() {
+        // Its host restarting onto another microphone: no capture side in the
+        // graph, so the microphone jayos-audio recorded is the answer, and
+        // never EasyEffects' inputDevice, which is no part of this path.
+        let rc = "[StreamInputs]\ninputDevice=alsa_input.webcam\n";
+        let record = "strength=maximum\ninput=alsa_input.usb-Blue_Yeti\n";
+        assert_eq!(
+            behind(
+                "jayos_denoise_source",
+                Side::Source,
+                &json!([]),
+                &records(Some(rc), None, Some(record))
+            )
+            .as_deref(),
+            Some("alsa_input.usb-Blue_Yeti")
+        );
+        assert_eq!(
+            behind(
+                "jayos_denoise_source",
+                Side::Source,
+                &json!([]),
+                &records(Some(rc), None, None)
+            ),
+            None
+        );
+        // A record that names no microphone, as it does while the host
+        // records whatever is the default, names none.
+        assert_eq!(
+            behind(
+                "jayos_denoise_source",
+                Side::Source,
+                &json!([]),
+                &records(None, None, Some("strength=balanced\n"))
+            ),
+            None
+        );
+        // And EasyEffects' source never reads the denoise record.
+        assert_eq!(
+            behind(
+                "easyeffects_source",
+                Side::Source,
+                &json!([]),
+                &records(None, None, Some(record))
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_denoise_source_as_default_puts_the_hero_on_the_microphone_it_records() {
+        let sources = vec![
+            json!({"index": 2, "name": "alsa_input.usb-Blue_Yeti",
+                   "properties": {"device.description": "Yeti"},
+                   "volume": {"mono": {"value_percent": "35%"}}, "mute": false}),
+            json!({"index": 9, "name": "jayos_denoise_source",
+                   "properties": {"device.description": "Microphone (noise suppressed)"},
+                   "volume": {"mono": {"value_percent": "100%"}}, "mute": false}),
+        ];
+        let state = build_state(&[], &sources, &[], "", "jayos_denoise_source");
+        assert_eq!(state.inputs.iter().map(|i| i.inert).collect::<Vec<_>>(), vec![false, true]);
+        let (default, target) = master_rows(&state.inputs, Side::Source, |name| {
+            assert_eq!(name, "jayos_denoise_source");
+            Some("alsa_input.usb-Blue_Yeti".to_string())
+        })
+        .expect("a target");
+        assert_eq!(
+            (default.name.as_str(), target.name.as_str()),
+            ("jayos_denoise_source", "alsa_input.usb-Blue_Yeti")
+        );
+        let refused = master_rows(&state.inputs, Side::Source, |_| None).unwrap_err();
+        assert!(refused.contains("jayos-audio's noise suppression"), "{refused}");
     }
 
     #[test]
@@ -2979,8 +3091,13 @@ id 52, type PipeWire:Interface:Node
         let rc = "[StreamOutputs]\noutputDevice=alsa_output.headphones\n";
         assert_eq!(parse(Some(text.clone())), json!([]), "one document refuses it");
         assert_eq!(
-            behind("easyeffects_sink", Side::Sink, &parse_dump(Some(text)), Some(rc), None)
-                .as_deref(),
+            behind(
+                "easyeffects_sink",
+                Side::Sink,
+                &parse_dump(Some(text)),
+                &records(Some(rc), None, None)
+            )
+            .as_deref(),
             Some("alsa_output.speakers")
         );
         assert_eq!(parse_dump(None), json!([]));

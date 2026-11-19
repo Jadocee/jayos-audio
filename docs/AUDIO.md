@@ -130,6 +130,16 @@ configuration; `contract/config.<strength>.conf` holds each, byte for byte.
   either side of the plugin*. RUN on PipeWire 1.6.11 in the sandbox: the
   running filter held `pre:Mult` 3.98107 and `post:Mult` 0.25119, and white
   noise came out 48.1 dB quieter.
+- **The volume popup's input slider.** The source's own level works -- a
+  stream's software volume, after the plugin -- and that is why
+  `jayos-audio-state` treats it as inert since 2026-11-19, as it does the
+  channel sink. Turned up, it made what survived the plugin louder and
+  brought back nothing the plugin had cut. The hero and the volume keys act
+  on the microphone the capture side records, which `pw_route::device_behind`
+  reaches through the filter-chain's `node.link-group`. While the host
+  restarts onto another microphone, the one `denoise.state` names stands in.
+  JayOS's `jayos-privacy` mutes that microphone too, from the same module,
+  which `rust/crates/jayos-core` vendors.
 - **1.x's preset.** `on` bypasses DeepFilterNet in EasyEffects' `denoise`
   input preset, where 1.x left one, and reloads it where EasyEffects holds it
   (`retire_easyeffects_preset`), so the microphone is never filtered twice.
