@@ -455,15 +455,26 @@ within 30 dB of the loudest. Two seconds of noise alone came first.
 
 What was compared:
 - the output, aligned to the clean speech by cross-correlation (80.7 ms in
-  every run);
+  every run of the first measurement, and 80.7 or one quantum more when the
+  levels were run again three at a time: an underrun in the first second,
+  which the dropout count leaves out, grows the plugin's delay by a quantum);
 - the speech energy kept over the frames that hold speech;
 - the share of those frames cut by more than 20 dB, which is what a lost
   syllable looks like;
 - the noise removed over the lead.
 
-No run dropped a sample. The host, the inputs and the analysis were not
-committed. This is run evidence about the plugin; a person listening was not
-part of it.
+No run dropped a sample. This is run evidence about the plugin; a person
+listening was not part of it.
+
+The host, the inputs and the analysis are `tools/measure/` since 2026-11-19:
+`tools/measure/measure.py strengths`, `levels` or `gain` runs a table's
+measurement where the plugin is installed, fetching the two clips at the
+commit the recipe pins and refusing either unless it hashes to the bytes
+measured here. Run again with it that day in the same container, against
+2.0.1's plugin, `levels` gave every value of the table below.
+`tests/shell/test-measure.sh` holds the host and the analysis to a stub
+plugin that passes its input through a fixed delay, whose right answer is
+known.
 
 At a fixed 6 dB SNR, by level (speech energy kept, and the share of speech
 frames cut by more than 20 dB):
