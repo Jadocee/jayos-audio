@@ -81,8 +81,9 @@ in `$XDG_STATE_HOME/jayos-audio/denoise.state`, then enables and starts
 which writes the host's configuration under
 `$XDG_RUNTIME_DIR/jayos-audio/` and execs `pipewire -c` on it: a PipeWire
 client, not a second daemon, that loads module-rt, the native protocol and
-`libpipewire-module-filter-chain` with one node, the plugin's
-`deep_filter_mono` label. `jayos-audio denoise config <strength>` prints that
+`libpipewire-module-filter-chain` with the plugin's `deep_filter_mono` label
+between two of PipeWire's builtin `linear` nodes (*The gain either side*,
+below). `jayos-audio denoise config <strength>` prints that
 configuration; `contract/config.<strength>.conf` holds each, byte for byte.
 
 - **Mono.** A microphone is one channel, and the stereo label would run the
@@ -120,6 +121,25 @@ configuration; `contract/config.<strength>.conf` holds each, byte for byte.
   `pw-metadata <id> target.object`. RUN on 0.4.17: the attenuation read back
   100 after `strength maximum`, and the capture relinked to the other
   microphone.
+- **The gain either side.** Since 2026-11-19, `pre` multiplies the
+  microphone by 12 dB before `df` and `post` divides by as much after it, so
+  the plugin hears the microphone 12 dB louder and applications record it as
+  loud as it is. DeepFilterNet cuts quiet speech on every strength, and the
+  12 dB moved the level where it starts about 10 dB lower at almost no cost
+  to loud speech. The measurement is in docs/DEEPFILTERNET.md, *The gain
+  either side of the plugin*. RUN on PipeWire 1.6.11 in the sandbox: the
+  running filter held `pre:Mult` 3.98107 and `post:Mult` 0.25119, and white
+  noise came out 48.1 dB quieter.
+- **The volume popup's input slider.** The source's own level works -- a
+  stream's software volume, after the plugin -- and that is why
+  `jayos-audio-state` treats it as inert since 2026-11-19, as it does the
+  channel sink. Turned up, it made what survived the plugin louder and
+  brought back nothing the plugin had cut. The hero and the volume keys act
+  on the microphone the capture side records, which `pw_route::device_behind`
+  reaches through the filter-chain's `node.link-group`. While the host
+  restarts onto another microphone, the one `denoise.state` names stands in.
+  JayOS's `jayos-privacy` mutes that microphone too, from the same module,
+  which `rust/crates/jayos-core` vendors.
 - **1.x's preset.** `on` bypasses DeepFilterNet in EasyEffects' `denoise`
   input preset, where 1.x left one, and reloads it where EasyEffects holds it
   (`retire_easyeffects_preset`), so the microphone is never filtered twice.

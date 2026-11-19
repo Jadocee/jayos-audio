@@ -161,6 +161,23 @@ for s in gentle balanced maximum; do
 done
 engine denoise config balanced
 says "the plugin's own mono label" "label  = deep_filter_mono" "$OUT"
+# The gain either side of the plugin (host_config's comment): 12 dB, the
+# measured choice of docs/DEEPFILTERNET.md, louder into the plugin and as much
+# quieter out of it, so what is recorded is as loud as the microphone.
+GAIN=$(sed -n -E 's/^PRE_GAIN_DB=([0-9.]+)$/\1/p' "$ENGINE")
+check "the gain before the plugin is the measured 12 dB" "12" "$GAIN"
+PRE=$(awk '/name    = pre$/ { f = 1 } f && /"Mult"/ { gsub(/[^0-9.]/, "", $0); print; exit }' <<<"$OUT")
+POST=$(awk '/name    = post$/ { f = 1 } f && /"Mult"/ { gsub(/[^0-9.]/, "", $0); print; exit }' <<<"$OUT")
+check "pre multiplies by 10^(12/20)" "3.98107171" "$PRE"
+check "post by 10^(-12/20)" "0.25118864" "$POST"
+check "and the two undo each other to a millionth" "1" \
+    "$(awk -v a="${PRE:-0}" -v b="${POST:-0}" 'BEGIN { d = a * b - 1; print (d < 1e-6 && d > -1e-6) ? 1 : 0 }')"
+check "pre, the plugin and post, in that order" "pre|df|post" \
+    "$(sed -n -E 's/^[[:space:]]+name +=[[:space:]]+(pre|df|post)$/\1/p' <<<"$OUT" | paste -sd'|')"
+says "pre feeds the plugin" '{ output = "pre:Out"       input = "df:Audio In" }' "$OUT"
+says "and the plugin feeds post" '{ output = "df:Audio Out"  input = "post:In" }' "$OUT"
+says "the microphone enters at pre" 'inputs  = [ "pre:In" ]' "$OUT"
+says "and leaves at post" 'outputs = [ "post:Out" ]' "$OUT"
 says "one channel" "audio.position = [ MONO ]" "$OUT"
 says "at the model's rate" "audio.rate     = 48000" "$OUT"
 says "the plugin where it is" "plugin = \"$PLUGIN\"" "$OUT"

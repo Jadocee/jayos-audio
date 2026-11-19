@@ -37,7 +37,7 @@
 # diff nobody can read.
 
 pkgname=jayos-audio
-pkgver=2.0.1
+pkgver=2.1.0
 pkgrel=1
 pkgdesc="JayOS's audio engine: microphone noise suppression with DeepFilterNet 3 in a PipeWire filter-chain, real time through rtkit, and the PipeWire settings JayOS needs"
 arch=('x86_64')

@@ -172,6 +172,9 @@ echo "strength $(ja denoise strength maximum)"
 sleep 0.5
 cap=$(pw-dump 2>/dev/null | jq -r 'first(.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == "jayos_denoise_capture") | .id)')
 echo "atten-after-strength $(pw-dump "$cap" 2>/dev/null | jq -r '[.. | objects | select(has("params")) | .params | arrays | . as $p | range(0; length; 2) | select($p[.] == "df:Attenuation Limit (dB)") | $p[. + 1]] | first // empty')"
+for g in pre post; do
+    echo "gain-$g $(pw-dump "$cap" 2>/dev/null | jq -r --arg k "$g:Mult" '[.. | objects | select(has("params")) | .params | arrays | . as $p | range(0; length; 2) | select($p[.] == $k) | $p[. + 1]] | first // empty')"
+done
 
 # Noise in, filtered out: mic-b is recorded now, so feed it.
 pw-cat --record --target jayos_denoise_source --rate 48000 --channels 1 --format s16 "$BOX/out.wav" > /dev/null 2>&1 &
@@ -202,6 +205,10 @@ check "the capture side records the microphone that was the default, not the one
 check "input moves the running filter onto the other microphone" "mic-b" "$(val capture-from-after-input)"
 check "strength on a running host is set live" "strength maximum" "$(val strength)"
 check "and the filter's attenuation limit is maximum's" "100" "$(val atten-after-strength | sed -E 's/\.0+$//')"
+# The gain either side of the plugin, as the running filter holds it: a float,
+# so to five places.
+check "the running filter's gain into the plugin is 12 dB, and out of it as much less" "3.98107|0.25119" \
+    "$(printf '%.5f|%.5f' "$(val gain-pre || echo 0)" "$(val gain-post || echo 0)" 2>/dev/null)"
 check "a recording came out of the filtered source" "yes" "$(val recorded)"
 if [[ -s "$WORK/box/out.wav" ]]; then
     drop=$(python3 -I - "$WORK/noise.wav" "$WORK/box/out.wav" <<'EOF'

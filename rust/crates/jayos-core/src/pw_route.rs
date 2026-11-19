@@ -66,6 +66,19 @@ pub const CHANNELS_SINK: &str = "jayos_channels_sink";
 /// the channel sink's own plumbing and no application's.
 pub const CHANNELS_OUTPUT: &str = "jayos_channels_output";
 
+/// The source applications record while noise suppression is on: the playback
+/// side of `jayos-audio denoise host`'s filter-chain, whose capture side
+/// records a microphone (src/jayos-audio, `SOURCE`). Its own level works -- a
+/// stream's software volume, after the plugin -- and that is why it is inert
+/// since 2026-11-19. DeepFilterNet cuts quiet speech on every strength
+/// (docs/DEEPFILTERNET.md, *Quiet speech, measured*), so the level that
+/// decides what survives is the one BEFORE the plugin, the microphone's, and a
+/// slider on this source turned up the speech that was left without bringing
+/// back any that was cut. Its controls act on the microphone its capture side
+/// records, which [`device_behind`] reaches through the filter-chain's link
+/// group, as it does the channel sink's device.
+pub const DENOISE_SOURCE: &str = "jayos_denoise_source";
+
 /// Which way from the virtual device the real one lies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -117,7 +130,7 @@ pub fn inert(props: Option<&Map<String, Value>>, name: &str) -> bool {
     if prop(props, "device.class") == "monitor" || name.ends_with(".monitor") {
         return false;
     }
-    if name == CHANNELS_SINK {
+    if name == CHANNELS_SINK || name == DENOISE_SOURCE {
         return true;
     }
     let easyeffects =
@@ -308,7 +321,31 @@ pub fn channels_output(state: &str) -> Option<String> {
     state
         .lines()
         .filter_map(|line| line.strip_prefix("output="))
-        .last()
+        // From the end, which is the last one written without reading every
+        // line before it (clippy 1.100's double_ended_iterator_last).
+        .next_back()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// jayos-audio's record of its noise suppression:
+/// `$XDG_STATE_HOME/jayos-audio/denoise.state`, the same `key=value` lines as
+/// [`channels_state`], src/jayos-audio's `STATE_FILE`.
+pub fn denoise_state() -> PathBuf {
+    channels_state().with_file_name("denoise.state")
+}
+
+/// The microphone the noise suppression records, from that record: its
+/// `input`, the last one written. What a walk cannot find while the host
+/// restarts onto another microphone. `None` where it records whatever is the
+/// default, since then it names none.
+pub fn denoise_input(state: &str) -> Option<String> {
+    state
+        .lines()
+        .filter_map(|line| line.strip_prefix("input="))
+        // From the end, as channels_output reads its record.
+        .next_back()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -766,6 +803,61 @@ outputDevice=alsa_output.speakers
         graph.retain(|o| !(o["id"] == 242 || o["id"] == 243));
         let dump = Value::Array(graph);
         assert_eq!(device_behind(&dump, CHANNELS_SINK, Side::Sink), None);
+    }
+
+    /// jayos-audio's noise suppression in pw-dump's shape: a filter-chain whose
+    /// capture side records the microphone and whose playback side is the
+    /// source applications record, the two in one link group with no link
+    /// between them, and Zoom recording the source.
+    fn denoise_graph() -> Vec<Value> {
+        let mut graph = easyeffects_graph();
+        let side = |id: u64, name: &str, class: &str| {
+            json!({ "id": id, "type": "PipeWire:Interface:Node", "info": { "props": {
+                "node.name": name, "media.class": class,
+                "node.link-group": "filter-chain-5151-7", "object.serial": id + 100 } } })
+        };
+        graph.push(side(130, "jayos_denoise_capture", "Stream/Input/Audio"));
+        graph.push(side(131, DENOISE_SOURCE, "Audio/Source"));
+        graph.push(link(250, 60, 130));
+        graph.push(link(251, 131, 96));
+        graph
+    }
+
+    #[test]
+    fn the_denoise_source_is_inert_and_its_capture_side_is_not() {
+        assert!(inert(None, DENOISE_SOURCE));
+        assert!(!inert(None, "jayos_denoise_capture"));
+        let monitor = json!({ "device.class": "monitor" });
+        assert!(!inert(monitor.as_object(), DENOISE_SOURCE));
+    }
+
+    #[test]
+    fn the_denoise_source_resolves_through_its_link_group_to_the_microphone() {
+        let dump = Value::Array(denoise_graph());
+        assert_eq!(
+            device_behind(&dump, DENOISE_SOURCE, Side::Source).as_deref(),
+            Some("alsa_input.usb-mic")
+        );
+    }
+
+    #[test]
+    fn a_denoise_source_whose_capture_side_records_nothing_resolves_to_nothing() {
+        let mut graph = denoise_graph();
+        graph.retain(|o| o["id"] != 250);
+        let dump = Value::Array(graph);
+        assert_eq!(device_behind(&dump, DENOISE_SOURCE, Side::Source), None);
+    }
+
+    #[test]
+    fn the_denoise_record_names_its_last_input() {
+        assert_eq!(
+            denoise_input("strength=maximum\ninput=alsa_input.a\ninput=alsa_input.usb-mic\n")
+                .as_deref(),
+            Some("alsa_input.usb-mic")
+        );
+        assert_eq!(denoise_input("strength=balanced\ninput=\n"), None);
+        assert_eq!(denoise_input(""), None);
+        assert!(denoise_state().ends_with("jayos-audio/denoise.state"));
     }
 
     #[test]
