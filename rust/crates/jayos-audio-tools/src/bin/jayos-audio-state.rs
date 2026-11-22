@@ -1981,7 +1981,7 @@ id 52, type PipeWire:Interface:Node
 
     #[test]
     fn a_usb_device_says_usb_under_its_title() {
-        // The owner's DAC as pactl lists it under PipeWire: the node name was
+        // The 7950X/4080 desktop's DAC as pactl lists it under PipeWire: the node name was
         // its subtitle, "alsa_output.usb-Schiit_Audio_Schiit_Modi_3-00...".
         let schiit = device(
             "alsa_output.usb-Schiit_Audio_Schiit_Modi_3-00.analog-stereo",

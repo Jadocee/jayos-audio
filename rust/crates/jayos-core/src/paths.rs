@@ -212,7 +212,7 @@ mod tests {
     /// Every name the code above reads by name, which the test below clears
     /// before it sets its own. A desktop session exports QS_HYPR_DIR and its
     /// neighbours into every terminal (config/common/scripts/paths.sh); the
-    /// test cleared four of these and not QS_HYPR_DIR, so on the owner's
+    /// test cleared four of these and not QS_HYPR_DIR, so on a real
     /// machine on 2026-11-15 hypr_dir() answered the session's own directory
     /// and jayos-bluetooth's release was refused, where a container with no
     /// session passed. `the_names_cleared_are_the_names_read` holds this list

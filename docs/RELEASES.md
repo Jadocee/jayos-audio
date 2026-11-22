@@ -45,7 +45,7 @@ vendors its `contract/` and scripts into `tools/fixtures/jayos-audio-contract/`
 there, with their sums. That is a change to JayOS, made and committed there,
 and its suites say whether the release still fits.
 
-## The owner's steps
+## The steps taken by hand
 
 Once, before the first release:
 

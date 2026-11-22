@@ -1,4 +1,4 @@
-# A jayos-audio release's page, for a tag the owner pushed with
+# A jayos-audio release's page, for a signed tag pushed with
 # tools/release.sh. The workflow holds no key and makes no tag: it checks the
 # tag it is handed -- signed by a key main's .github/allowed_signers lists, on
 # main, VERSION its version -- runs the package's check at the tag, and
@@ -39,7 +39,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: The tag is the owner's, on main, and VERSION's
+      - name: The tag is signed with the release key, on main, and VERSION's
         env:
           TAG: ${{ github.ref_name }}
         run: tools/publish-release.sh verify "$TAG"

@@ -196,8 +196,8 @@ EXPECTED=(
     "EffectsPipelines inputInactivityTimerEnable true"
 )
 
-# THE SETTINGS SET AWAY FROM EASYEFFECTS' DEFAULTS, by the owner's call on
-# 2026-11-11, written where the rc holds another value or none:
+# THE SETTINGS SET AWAY FROM EASYEFFECTS' DEFAULTS, since 2026-11-11,
+# written where the rc holds another value or none:
 #
 #   processAllInputs        false  no recording through EasyEffects. On, every
 #                                  recording was moved onto easyeffects_source,
@@ -208,8 +208,8 @@ EXPECTED=(
 #                                  leaves EasyEffects). The noise filter is
 #                                  jayos-audio's own PipeWire filter-chain now, and
 #                                  needs nothing of EasyEffects
-#   ignorePresetBlocklist   true   by the owner's call of 2026-11-11, "don't route
-#                                  video games output through easy effects": a preset
+#   ignorePresetBlocklist   true   since 2026-11-11, so that games stay out of
+#                                  EasyEffects' output effects: a preset
 #                                  loaded leaves the output blocklist as it is. Off,
 #                                  EasyEffects puts each preset's own blocklist in its
 #                                  place as it loads it, and an empty one where the
@@ -228,9 +228,9 @@ WANTED=(
     "Presets ignorePresetBlocklist true"
 )
 
-# The voice-chat applications kept off the output effects, by the owner's
-# call on 2026-11-11: serpantinum-audio's list (its src/exclude.h, read on
-# 2026-11-11), and Element, the owner's. A call's far end is already
+# The voice-chat applications kept off the output effects, since
+# 2026-11-11: serpantinum-audio's list (its src/exclude.h, read on
+# 2026-11-11), and Element. A call's far end is already
 # processed by the sender and the call's own echo canceller; an equaliser
 # between it and the speakers changes what that canceller hears come back.
 # EasyEffects keeps an output stream off its effects when its application.id,
@@ -245,9 +245,8 @@ WANTED=(
 # into the person's list, never over it: an entry already there is left, and
 # nothing is removed.
 #
-# And, by the owner's call on 2026-11-12, "Steam party voice chat, steam
-# in-game voice chat, and signal, should not be routed through easyeffects
-# for audio output":
+# And, since 2026-11-12, Steam's party and in-game voice chat and Signal,
+# whose output is not routed through EasyEffects either:
 #
 #   steamwebhelper     Steam's chat, its party voice chat and the overlay's,
 #                      which Steam's client runs in its web helper, a
@@ -284,8 +283,7 @@ VOICE_APPS=(
     signal-desktop Signal org.signal.Signal
 )
 
-# The games kept off the output effects, by the owner's call on 2026-11-11:
-# "don't route video games output through easy effects". A game mixes its own
+# The games kept off the output effects, since 2026-11-11. A game mixes its own
 # sound for its own speakers and headphones settings, and an equaliser tuned
 # for music moves where its footsteps and its voices sit -- and its effects
 # ride the data thread every other stream's do, where a late cycle is a gap.

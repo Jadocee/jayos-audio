@@ -19,10 +19,10 @@ draws the line.
 
 ## Why the microphone left EasyEffects
 
-The owner's reports: on 2026-11-05, that the microphone stuttered in voice
-chat -- Element, "etc." -- with EasyEffects' Effects switch on, *with noise
-suppression off*, and was clean with the switch off; and on 2026-11-11, after
-the floor below had shipped, that it was laggy and cut out with the switch on.
+Two findings: on 2026-11-05, the microphone stuttered in voice chat --
+Element among the applications -- with EasyEffects' Effects switch on, *with
+noise suppression off*, and was clean with the switch off; and on 2026-11-11,
+after the floor below had shipped, it was laggy and cut out with the switch on.
 
 With the switch on, EasyEffects ran the microphone. JayOS sets its
 `processAllInputs`, so every recording stream was moved onto
@@ -64,7 +64,7 @@ default branch):
   `etc/pipewire/client.conf.d/50-omarchy-rtkit.conf`). Its speaker tuning is a
   filter-chain hosted by a PipeWire process of its own, as a user unit.
 
-The decisions, the owner's on 2026-11-11: the filter moves into a
+The decisions, made on 2026-11-11: the filter moves into a
 filter-chain host of its own, as omarchy hosts its tuning; the Effects switch
 no longer touches the microphone, and EasyEffects is output only; voice-chat
 applications skip EasyEffects' output effects, serpantinum's list and
@@ -585,7 +585,7 @@ its default, and no feature here sets any of them. So a switch flipped once
 in EasyEffects' own window went on undoing a feature, with nothing in the
 shell saying why. Three more are set away from their defaults since
 2026-11-11, below the table.
-Since 2026-10-17, by the owner's call, every `./install.sh --apply`, and so
+Since 2026-10-17, by design, every `./install.sh --apply`, and so
 every `update.sh`, runs `hypr/easyeffects.sh defaults` with no question, and
 it puts back any of these that `~/.config/easyeffects/db/easyeffectsrc` holds
 at another value:
@@ -609,8 +609,8 @@ read; `inputInactivityTimerEnable`'s is 8.3.2's. `EXPECTED` in
 copy of it, so a row taken out of one is a failure. `processAllInputs` was
 among its rows, at true, until 2026-11-11.
 
-**And three set away from EasyEffects' defaults**, by the owner's calls on
-2026-11-11, written wherever the file holds another value or none:
+**And three set away from EasyEffects' defaults**, since 2026-11-11,
+written wherever the file holds another value or none:
 
 | group | key | written | why |
 |---|---|---|---|
@@ -632,9 +632,9 @@ of every call-role stream has no equivalent here. The list is merged into the
 person's, never over it: their entries stay first and as written, an entry of
 ours already there is not added again, and nothing is removed.
 
-**Steam's voice chat and Signal**, by the owner's call on 2026-11-12: "Steam
-party voice chat, steam in-game voice chat, and signal, should not be routed
-through easyeffects for audio output".
+**Steam's voice chat and Signal**, since 2026-11-12: Steam's party and
+in-game voice chat, and Signal, are not routed through EasyEffects for their
+output.
 
 - **Steam's chat and party voice**, and the overlay's, run in Steam's web
   helper, a Chromium, so `steamwebhelper`, its binary, is a voice application
@@ -658,8 +658,7 @@ None of the three has run here: which names Steam's helper and Signal's
 streams carry is read, in their packaging and in WebRTC's and Chromium's
 sources, not seen in a running graph.
 
-**Games**, by the owner's call on 2026-11-11, "don't route video games output
-through easy effects": a game mixes its own sound for the speakers or
+**Games**, kept out of EasyEffects' output since 2026-11-11: a game mixes its own sound for the speakers or
 headphones its settings name, an equaliser tuned for music moves where its
 footsteps and voices sit, and its effects would ride the thread every other
 stream's do. No property says "game" -- PipeWire has none, and EasyEffects
@@ -754,7 +753,7 @@ jayos-easyeffects defaults
 ```
 
 A setting you want away from its default goes back at the next install:
-that is the trade the owner chose, and a row out of `EXPECTED` is how one
+that is the trade chosen by design, and a row out of `EXPECTED` is how one
 stops being put back. Run: `tools/test-easyeffects.sh`, against a fake
 EasyEffects that saves its bypass as it quits and a `pkill` that quits it.
 Not run: EasyEffects, KConfig or uwsm, on any machine; nor any of the

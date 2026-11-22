@@ -121,8 +121,8 @@ cargo_env() { # cargo_env <tree>
 }
 
 # MOLD LINKS WHAT THIS BUILDS -- the plugin, its tests and the two programs --
-# by JayOS's owner's call of 2026-11-13, "use https://github.com/rui314/mold
-# for building rust". As a link argument to the C compiler rustc drives, which
+# since 2026-11-13, as JayOS's Rust is (https://github.com/rui314/mold). As a
+# link argument to the C compiler rustc drives, which
 # takes over from Rust's own LLD (rust/.cargo/config.toml says how, and what
 # was run to show it), and through RUSTFLAGS rather than a cargo config:
 # makepkg.conf sets RUSTFLAGS, and cargo takes that in place of every config's

@@ -138,9 +138,10 @@ impl Budget {
 /// WHY THIS IS NOT OPTIONAL FOR ANYTHING THAT TALKS TO A DAEMON
 ///
 /// A daemon that accepts the connection and never answers is the common
-/// failure, not an exotic one: NetworkManager, bluetoothd, upowerd and dockerd
-/// all reach it, and `nmcli`/`bluetoothctl`/`upower`/`docker` all wait for a
-/// reply with no deadline of their own. These helpers are spawned from a QML
+/// failure, not an exotic one: NetworkManager, bluetoothd and upowerd all
+/// reach it, as does a Podman store held by a stuck lock, and
+/// `nmcli`/`bluetoothctl`/`upower`/`podman` all wait for a reply with no
+/// deadline of their own. These helpers are spawned from a QML
 /// poller, so a call that never returns is a panel frozen on stale data with
 /// no way back until the shell restarts, and nothing anywhere says why. Three
 /// binaries had each written their own version of this before it was shared.
@@ -237,7 +238,7 @@ fn run_within<S: AsRef<OsStr>>(
     // It also answered the wrong question. `spawn` reports a missing program as
     // NotFound, so a spent budget against an uninstalled tool came back
     // NotFound rather than TimedOut -- and jayos-container-status branches on exactly
-    // that, so it would have blamed "docker is not installed" for a daemon that
+    // that, so it would have blamed "podman is not installed" for a store that
     // had merely run out of time and sent the reader off to pacman.
     if timeout.is_zero() {
         return Err(io::Error::new(
@@ -260,7 +261,7 @@ fn run_within<S: AsRef<OsStr>>(
     // `.output()` gets this right; spawning and then reading one pipe and
     // waiting afterwards does not -- it deadlocks as soon as the other fills
     // its 64 KiB buffer, because the child is blocked writing and we are
-    // blocked waiting for it to exit. `docker ps --all --no-trunc` on a busy
+    // blocked waiting for it to exit. `podman ps --all --no-trunc` on a busy
     // machine and `pactl list cards` are both past that.
     let out_rx = drain(child.stdout.take());
     let err_rx = drain(child.stderr.take());
@@ -356,8 +357,8 @@ fn expired(child: Child, name: &str, timeout: Duration) -> io::Error {
 /// WHY THE WAIT IS BOUNDED
 ///
 /// SIGKILL is not delivered to a process in uninterruptible sleep until the
-/// syscall it is inside returns. `docker ps --all` against an overlay or
-/// NFS-backed graph driver whose mount has gone away is that, and so is
+/// syscall it is inside returns. `podman ps --all` against an overlay or
+/// NFS-backed store whose mount has gone away is that, and so is
 /// `upower -i` on a wedged USB controller. `kill` reports success, the process
 /// stays in D state, and an unbounded `wait` blocks for as long as the mount
 /// does -- so the deadline that exists to stop a panel freezing becomes the
@@ -640,7 +641,7 @@ mod tests {
     #[test]
     fn a_failure_is_told_apart_from_an_expiry() {
         // The distinction the callers branch on: jayos-container-status reports 124
-        // and "did not respond" for one and docker's own words for the other,
+        // and "did not respond" for one and podman's own words for the other,
         // and it cannot do that from a single "it did not work".
         let ran = output_within("sh", &["-c", "printf no >&2; exit 3"], TWENTY)
             .expect("a child that exits non-zero ran, and is not an error");
@@ -685,7 +686,7 @@ mod tests {
         // forking. A spent budget that still spawns hands an already-wedged
         // daemon a fresh client every poll, and it reports the wrong cause: the
         // spawn's own NotFound reaches the caller instead of TimedOut, and
-        // jayos-container-status turns that into "<runtime> is not installed".
+        // jayos-container-status turns that into "podman is not installed".
         //
         // A missing program is what makes this observable either way: a runner
         // that spawns can only answer NotFound, and one that does not can only
@@ -750,7 +751,7 @@ mod tests {
 
     #[test]
     fn a_kill_that_does_not_land_does_not_hold_the_caller() {
-        // The D-state case -- `docker ps` on a graph driver whose mount has
+        // The D-state case -- `podman ps` on a store whose mount has
         // gone away -- cannot be provoked without a hostile mount, so what is
         // tested is the mechanism rather than the symptom: with no grace at
         // all, the reap must give up on a child that is still there and return
