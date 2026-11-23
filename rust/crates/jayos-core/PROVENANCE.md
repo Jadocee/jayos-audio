@@ -13,7 +13,7 @@ leaves out `now_unix`, which neither program calls. Its header says so.
 | | |
 |---|---|
 | Repository | `https://github.com/Jadocee/jayos` |
-| Commit | `c5ed2573bcbdbfa03ebf069a3366422a3177220a` (2026-11-19) |
+| Commit | `9e3f09d3bd7122e3d9498c1accdfa32bc632513d` (2026-11-22) |
 | Branch it was taken from | `ccr-3147b012-y550t7` |
 | Path there | `rust/crates/jayos-core/` |
 
@@ -21,9 +21,9 @@ leaves out `now_unix`, which neither program calls. Its header says so.
 |---|---|
 | `Cargo.toml` | `670d93e5d5130428d7c0f76ffd18acaeceda1d3119c99b8d3e6dc3a97e2f4f26` |
 | `src/cli.rs` | `3842ab6326250ea2dcb2208a9a637eff83472a75a424860286af3157769bad5e` |
-| `src/emit.rs` | `e8b751ce39bb5f7af9119f8c9cef849764a3fb45f5c2a6c6268bdadf8ddcde76` |
-| `src/paths.rs` | `bb0de1e5c14fcf5630bf629868c3b317b4924e732a4fcea58b82f3265277794b` |
-| `src/proc.rs` | `55ddcecd7f2dfca90e2ea674112f38d83ee5f84b60a39613979a58fdae883580` |
+| `src/emit.rs` | `c9ef26b4a3168c3283f2cc3c98a9a0079aa051982f963573c49429b2e83ceb0a` |
+| `src/paths.rs` | `eade904e374bc6c11ab9cfeacc77cac1c5a58b78a4a7b6b3530b38adccbec2e8` |
+| `src/proc.rs` | `57a6091627399c710fb5bd470bab5f646c84a1ae6471bdce41fe7c62d6678fe8` |
 | `src/pw_route.rs` | `2fb269db3f894f0a106e02d4b5192c27d7c55fecede6e7e9671862de585228e5` |
 
 `Cargo.toml` takes its version, edition, rust-version and licence from the

@@ -454,7 +454,7 @@ fi
 # ── what a row says under its title ──────────────────────────────────────────
 step "Each row says its bus or its track under its title, never a node name or a repeat"
 
-# The owner's machine as pactl lists it: a USB DAC, Bluetooth headphones, a
+# The 7950X/4080 desktop as pactl lists it: a USB DAC, Bluetooth headphones, a
 # GPU's third HDMI port and the motherboard's codec, and the streams the
 # review saw. The popup drew each device's node name under its title --
 # alsa_output.usb-Schiit_Audio_Schiit..., bluez_output.AC_80_0A_1F_33_5E.1 --

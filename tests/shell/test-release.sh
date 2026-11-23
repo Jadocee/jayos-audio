@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Releases: tools/release.sh, the owner's signed tag, and
+# Releases: tools/release.sh, the signer's signed tag, and
 # tools/publish-release.sh, what the release workflow checks and publishes.
 #
 # RUN in scratch repositories with keys made here and thrown away: an origin,
-# bare, and the owner's clone of it, holding this repository's three release
+# bare, and the signer's clone of it, holding this repository's three release
 # scripts, a VERSION, an .github/allowed_signers and a tools/check.sh that
 # passes or fails as a file says -- so every refusal is asked of the real
 # scripts over a real git, and every signature is a real ssh-keygen's. No
@@ -49,7 +49,7 @@ git config --global init.defaultBranch main
 git config --global commit.gpgsign false
 git config --global advice.detachedHead false
 
-# Two keys: the owner's, which the signers file lists, and a stranger's.
+# Two keys: the signer's, which the signers file lists, and a stranger's.
 ssh-keygen -q -t ed25519 -N '' -C owner -f "$WORK/owner" >/dev/null 2>&1 \
     && ssh-keygen -q -t ed25519 -N '' -C stranger -f "$WORK/stranger" >/dev/null 2>&1 \
     || { echo "test-release not exercised: ssh-keygen could not make a key" >&2; exit 2; }
@@ -57,8 +57,8 @@ OWNER_LINE="owner@example.invalid namespaces=\"git\" $(cut -d' ' -f1,2 "$WORK/ow
 
 ORIGIN="$WORK/origin.git"
 CLONE="$WORK/clone"
-# fresh [signers line]: an origin and the owner's clone of it, at VERSION
-# 2.0.0, the signers file holding the line given (the owner's by default,
+# fresh [signers line]: an origin and the signer's clone of it, at VERSION
+# 2.0.0, the signers file holding the line given (the signer's by default,
 # none for ''), and tools/check.sh passing; main pushed.
 fresh() {
     local line="${1-$OWNER_LINE}"
@@ -89,7 +89,7 @@ echo
 echo "the signers file and the workflow"
 KEYS=$(grep -vE '^[[:space:]]*(#|$)' "$ROOT/.github/allowed_signers" || true)
 if [[ -z "$KEYS" ]]; then
-    pass "this repository's .github/allowed_signers holds no key yet: every release is refused until the owner adds one"
+    pass "this repository's .github/allowed_signers holds no key yet: every release is refused until a key is added"
 else
     check "every key line in .github/allowed_signers carries namespaces=\"git\"" "" \
         "$(grep -v 'namespaces="git"' <<<"$KEYS")"
@@ -179,7 +179,7 @@ check "a key the signers file does not list: refused, and the tag deleted, never
 says "saying why" "is not signed by a key origin/main's .github/allowed_signers lists" "$OUT"
 git -C "$CLONE" config user.signingkey "$WORK/owner.pub"
 OUT=$(release --apply); ST=$?
-check "and with the owner's key again, 2.0.1 is released" "0|v2.0.0 v2.0.1" "$ST|$(remote_tags)"
+check "and with the release key again, 2.0.1 is released" "0|v2.0.0 v2.0.1" "$ST|$(remote_tags)"
 
 for v in 2.0 v2.0.2 02.0.2 2.0.1 1.9.9; do
     printf '%s\n' "$v" > "$CLONE/VERSION"
@@ -221,7 +221,7 @@ git -C "$CLONE" checkout -q -b side
 printf '2.0.5\n' > "$CLONE/VERSION"; git -C "$CLONE" commit -qam "side"
 git -C "$CLONE" tag -s -m "jayos-audio 2.0.5" v2.0.5 >/dev/null 2>&1
 OUT=$(publish verify v2.0.5); ST=$?
-check "nor one signed by the owner but not on main" 1 "$ST"
+check "nor one signed with the release key but not on main" 1 "$ST"
 says "saying so" "which is not on main" "$OUT"
 git -C "$CLONE" checkout -q main
 git -C "$CLONE" tag -s -m "wrong version" v2.0.6 >/dev/null 2>&1

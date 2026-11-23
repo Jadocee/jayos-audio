@@ -177,7 +177,7 @@ pub fn unknown_flag(program: &str, unknown: &[String], known: &[&str]) -> ExitCo
 /// Nothing on stdout, deliberately. See the module header.
 pub fn note_unknown_flag(program: &str, unknown: &[String], known: &[&str]) {
     let given = with_dashes(unknown.iter().map(String::as_str));
-    eprintln!("{program}: unknown option: {given} (ignored); {}", expected(known));
+    eprintln!("{program}: unknown option: {given} (ignored), {}", expected(known));
 }
 
 fn with_dashes<'a>(names: impl Iterator<Item = &'a str>) -> String {

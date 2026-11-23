@@ -14,7 +14,7 @@
 # tools/jayos-audio-release.sh); docs/RELEASES.md here has the whole account.
 #
 # The same shapes as JayOS's tools/lib/release.sh, where a release is a
-# signed tag too, so the owner signs both with one key and one habit; the
+# signed tag too, so both are signed with one key and one habit; the
 # version is semantic here rather than a date, since JayOS's recipe and
 # contract say which version of this package they were written against.
 

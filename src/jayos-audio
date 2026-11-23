@@ -48,7 +48,7 @@
 # recording was moved onto easyeffects_source, through every plugin of the
 # preset, in EasyEffects' one PipeWire data thread -- the thread that also runs
 # every output effect, for the speakers' graph on the speakers' clock -- and the
-# owner's microphone lagged and cut out in calls (docs/AUDIO.md, *Why the
+# microphone lagged and cut out in calls (docs/AUDIO.md, *Why the
 # microphone left EasyEffects*). Now the filter is a PipeWire filter-chain in a
 # process of its own, as the DeepFilterNet fork documents
 # (ladspa/filter-chain-configs/deepfilter-mono-source.conf) and as omarchy

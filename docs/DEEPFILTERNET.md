@@ -755,8 +755,8 @@ jemalloc while the Rust side already has thin LTO, and the debug option would
 add `-C debuginfo=2` to 145 crates for a `-debug` package nothing here would
 open.
 
-**Linked with mold**, since 2026-11-13, by JayOS's owner's call, "use
-https://github.com/rui314/mold for building rust": `packaging/steps.sh`
+**Linked with mold**, https://github.com/rui314/mold, since 2026-11-13, as
+JayOS's Rust is: `packaging/steps.sh`
 appends `-C link-arg=-fuse-ld=mold` to `RUSTFLAGS` for `build` and `check`,
 after makepkg's own and once, and refuses both before cargo where `ld.mold` is
 not found; both recipes name `mold` among their makedepends, and

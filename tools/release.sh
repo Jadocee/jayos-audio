@@ -5,7 +5,8 @@
 #   tools/release.sh            dry run: the version, the commit, and every refusal
 #   tools/release.sh --apply    the signed tag vVERSION, made, checked and pushed
 #
-# Run by the owner, in their checkout, on an up-to-date main, after VERSION
+# Run by whoever holds the release key, in their checkout, on an up-to-date
+# main, after VERSION
 # says the version to release. docs/RELEASES.md is the account.
 #
 # Exit status: 0 tagged, or would tag; 1 refused, with the reason; 2 could
@@ -24,9 +25,9 @@
 # the remote-tracking refs `git fetch` updates, which it needs to know the
 # releases that exist rather than the ones this clone has seen.
 #
-# THE OWNER SIGNS, HERE. The release workflow (.github/workflows/release.yml)
-# holds no key: a workflow that could tag would be one that could sign as the
-# owner. It checks what it is handed and publishes the release's page.
+# THE RELEASE IS SIGNED HERE. The release workflow (.github/workflows/release.yml)
+# holds no key: a workflow that could tag would be one that could sign with
+# the release key. It checks what it is handed and publishes the release's page.
 #
 # WHAT IT REFUSES, each before anything is tagged:
 #
@@ -151,7 +152,7 @@ git show refs/remotes/origin/main:.github/allowed_signers >"$SIGNERS" 2>/dev/nul
 [[ -n "$(release_signers_keys "$SIGNERS")" ]] \
     || refuse ".github/allowed_signers on origin/main holds no key yet" \
         "every release is refused until the public half of your signing key is in it" \
-        "(docs/RELEASES.md, \"The owner's steps\")"
+        "(docs/RELEASES.md, \"The steps taken by hand\")"
 
 # ── the check, over the commit ───────────────────────────────────────────────
 WORKTREE=$(mktemp -d "${TMPDIR:-/tmp}/jayos-audio-release-tree.XXXXXX") || cannot "no temporary directory"
